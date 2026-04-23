@@ -25,9 +25,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT/tools"
 
-CKPT="${1:-../models/checkpoints/faster_rcnn_R50_cityscapes.pth}"
-CFG="../configs/TTA/Cityscapes_R50.yaml"
-STATS_PATH="../models/stats/Cityscapes_R50_stats.pt"
+CKPT="${1:-../models/checkpoints/faster_rcnn_r50_coco.pth}"
+CFG="../configs/TTA/COCO_R50.yaml"
+STATS_PATH="../models/stats/COCO_R50_stats.pt"
 
 mkdir -p ../results/exp1
 
@@ -50,11 +50,11 @@ python train_net.py \
     TEST.ADAPTATION.ORACLE_PROTOTYPE False \
     TEST.ADAPTATION.ADAPTER_RESET True \
     TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
-    OUTPUT_DIR ../outputs/Cityscapes_TTA/exp1_varA
+    OUTPUT_DIR ../outputs/COCO_TTA/exp1_varA
 
-cp ../outputs/Cityscapes_TTA/exp1_varA/eval_matrix/eval_matrix.npy \
+cp ../outputs/COCO_TTA/exp1_varA/eval_matrix/eval_matrix.npy \
    ../results/exp1/eval_matrix_varA.npy 2>/dev/null || true
-cp ../outputs/Cityscapes_TTA/exp1_varA/eval_matrix/metrics.json \
+cp ../outputs/COCO_TTA/exp1_varA/eval_matrix/metrics.json \
    ../results/exp1/metrics_varA.json 2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,11 +77,11 @@ python train_net.py \
     TEST.ADAPTATION.ORACLE_PROTOTYPE True \
     TEST.ADAPTATION.ADAPTER_RESET False \
     TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
-    OUTPUT_DIR ../outputs/Cityscapes_TTA/exp1_varB
+    OUTPUT_DIR ../outputs/COCO_TTA/exp1_varB
 
-cp ../outputs/Cityscapes_TTA/exp1_varB/eval_matrix/eval_matrix.npy \
+cp ../outputs/COCO_TTA/exp1_varB/eval_matrix/eval_matrix.npy \
    ../results/exp1/eval_matrix_varB.npy 2>/dev/null || true
-cp ../outputs/Cityscapes_TTA/exp1_varB/eval_matrix/metrics.json \
+cp ../outputs/COCO_TTA/exp1_varB/eval_matrix/metrics.json \
    ../results/exp1/metrics_varB.json 2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────

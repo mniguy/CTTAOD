@@ -19,10 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT/tools"
 
-CKPT="${1:-../models/checkpoints/faster_rcnn_R50_cityscapes.pth}"
+CKPT="${1:-../models/checkpoints/faster_rcnn_r50_coco.pth}"
 BEST_ALPHA="${2:-0.2}"
-CFG="../configs/TTA/Cityscapes_R50.yaml"
-STATS_PATH="../models/stats/Cityscapes_R50_stats.pt"
+CFG="../configs/TTA/COCO_R50.yaml"
+STATS_PATH="../models/stats/COCO_R50_stats.pt"
 
 mkdir -p ../results/exp4
 
@@ -55,8 +55,8 @@ for P_RESTORE in 0.001 0.01 0.05 0.1; do
         TEST.ADAPTATION.ASRI_ALPHA 0.0 \
         TEST.ADAPTATION.STOCHASTIC_RESTORE True \
         TEST.ADAPTATION.STOCHASTIC_RESTORE_PROB "$P_RESTORE" \
-        OUTPUT_DIR "../outputs/Cityscapes_TTA/exp4_b1_p${P_TAG}"
-    cp "../outputs/Cityscapes_TTA/exp4_b1_p${P_TAG}/eval_matrix/metrics.json" \
+        OUTPUT_DIR "../outputs/COCO_TTA/exp4_b1_p${P_TAG}"
+    cp "../outputs/COCO_TTA/exp4_b1_p${P_TAG}/eval_matrix/metrics.json" \
        "../results/exp4/metrics_b1_p${P_TAG}.json" 2>/dev/null || true
 done
 # pick best by avg_mAP
@@ -78,7 +78,7 @@ PYEOF
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Exp 4 Baseline 2: EWC Regularization ==="
-FISHER_PATH="../models/stats/Cityscapes_R50_fisher.pt"
+FISHER_PATH="../models/stats/COCO_R50_fisher.pt"
 if [ -f "$FISHER_PATH" ]; then
     for EWC_L in 0.1 1.0 10.0 100.0; do
         EWC_TAG=$(echo "$EWC_L" | sed 's/\./_/g')
@@ -87,8 +87,8 @@ if [ -f "$FISHER_PATH" ]; then
             TEST.ADAPTATION.ASRI_ALPHA 0.0 \
             TEST.ADAPTATION.EWC_LAMBDA "$EWC_L" \
             TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
-            OUTPUT_DIR "../outputs/Cityscapes_TTA/exp4_b2_ewc${EWC_TAG}"
-        cp "../outputs/Cityscapes_TTA/exp4_b2_ewc${EWC_TAG}/eval_matrix/metrics.json" \
+            OUTPUT_DIR "../outputs/COCO_TTA/exp4_b2_ewc${EWC_TAG}"
+        cp "../outputs/COCO_TTA/exp4_b2_ewc${EWC_TAG}/eval_matrix/metrics.json" \
            "../results/exp4/metrics_b2_ewc${EWC_TAG}.json" 2>/dev/null || true
     done
 else
@@ -105,8 +105,8 @@ python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.ASRI_ALPHA 0.0 \
     TEST.ADAPTATION.PROTOTYPE_REPLAY True \
     TEST.ADAPTATION.PROTOTYPE_REPLAY_BUFFER_SIZE 3 \
-    OUTPUT_DIR ../outputs/Cityscapes_TTA/exp4_b3_replay
-cp ../outputs/Cityscapes_TTA/exp4_b3_replay/eval_matrix/metrics.json \
+    OUTPUT_DIR ../outputs/COCO_TTA/exp4_b3_replay
+cp ../outputs/COCO_TTA/exp4_b3_replay/eval_matrix/metrics.json \
    ../results/exp4/metrics_b3_replay.json 2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -116,8 +116,8 @@ echo ""
 echo "=== Exp 4 Baseline 4: ASRI Fixed α* = $BEST_ALPHA ==="
 python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.ASRI_ALPHA "$BEST_ALPHA" \
-    OUTPUT_DIR ../outputs/Cityscapes_TTA/exp4_b4_asri
-cp ../outputs/Cityscapes_TTA/exp4_b4_asri/eval_matrix/metrics.json \
+    OUTPUT_DIR ../outputs/COCO_TTA/exp4_b4_asri
+cp ../outputs/COCO_TTA/exp4_b4_asri/eval_matrix/metrics.json \
    ../results/exp4/metrics_b4_asri.json 2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -129,8 +129,8 @@ python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.ASRI_ALPHA "$BEST_ALPHA" \
     TEST.ADAPTATION.STOCHASTIC_RESTORE True \
     TEST.ADAPTATION.STOCHASTIC_RESTORE_PROB 0.01 \
-    OUTPUT_DIR ../outputs/Cityscapes_TTA/exp4_b5_asri_restore
-cp ../outputs/Cityscapes_TTA/exp4_b5_asri_restore/eval_matrix/metrics.json \
+    OUTPUT_DIR ../outputs/COCO_TTA/exp4_b5_asri_restore
+cp ../outputs/COCO_TTA/exp4_b5_asri_restore/eval_matrix/metrics.json \
    ../results/exp4/metrics_b5_asri_restore.json 2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -17,9 +17,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT/tools"
 
-CKPT="${1:-../models/checkpoints/faster_rcnn_R50_cityscapes.pth}"
-CFG="../configs/TTA/Cityscapes_R50.yaml"
-STATS_PATH="../models/stats/Cityscapes_R50_stats.pt"
+CKPT="${1:-../models/checkpoints/faster_rcnn_r50_coco.pth}"
+CFG="../configs/TTA/COCO_R50.yaml"
+STATS_PATH="../models/stats/COCO_R50_stats.pt"
 
 mkdir -p ../results/exp2
 
@@ -47,11 +47,11 @@ for ALPHA in $ALPHAS; do
         TEST.ADAPTATION.ORACLE_PROTOTYPE False \
         TEST.ADAPTATION.ADAPTER_RESET False \
         TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
-        OUTPUT_DIR "../outputs/Cityscapes_TTA/exp2_alpha_${ALPHA_TAG}"
+        OUTPUT_DIR "../outputs/COCO_TTA/exp2_alpha_${ALPHA_TAG}"
 
-    cp "../outputs/Cityscapes_TTA/exp2_alpha_${ALPHA_TAG}/eval_matrix/eval_matrix.npy" \
+    cp "../outputs/COCO_TTA/exp2_alpha_${ALPHA_TAG}/eval_matrix/eval_matrix.npy" \
        "../results/exp2/eval_matrix_alpha_${ALPHA_TAG}.npy" 2>/dev/null || true
-    cp "../outputs/Cityscapes_TTA/exp2_alpha_${ALPHA_TAG}/eval_matrix/metrics.json" \
+    cp "../outputs/COCO_TTA/exp2_alpha_${ALPHA_TAG}/eval_matrix/metrics.json" \
        "../results/exp2/metrics_alpha_${ALPHA_TAG}.json" 2>/dev/null || true
 done
 

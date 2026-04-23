@@ -21,7 +21,7 @@ MATRIX="../results/exp0/eval_matrix_baseline_per_class.npy"
 
 if [ ! -f "$MATRIX" ]; then
     echo "ERROR: $MATRIX not found."
-    echo "Run scripts/exp0_cityscapes.sh first."
+    echo "Run scripts/exp0_coco.sh first."
     exit 1
 fi
 
