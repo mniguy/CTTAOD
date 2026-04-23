@@ -10,7 +10,7 @@ export config_path="configs/TTA/COCO_${bb}.yaml"
 python tools/train_net.py \
   	--config-file "./configs/Base/COCO_faster_rcnn_${bb}_FPN_1x.yaml" \
   	--eval-only --wandb \
-	MODEL.WEIGHTS models/checkpoints/faster_rcnn_${bb}_coco.pth \
+	MODEL.WEIGHTS models/checkpoints/faster_rcnn_r50_coco.pth \
   	TEST.CONTINUAL_DOMAIN "False" \
 	TEST.COLLECT_FEATURES "True" \
 	OUTPUT_DIR outputs/COCO/${bb}_collect_feature_stats
@@ -19,7 +19,7 @@ python tools/train_net.py \
 python tools/train_net.py \
   	--config-file "./configs/Base/COCO_faster_rcnn_${bb}_FPN_1x.yaml" \
   	--eval-only --wandb \
-	MODEL.WEIGHTS models/checkpoints/faster_rcnn_${bb}_coco.pth \
+	MODEL.WEIGHTS models/checkpoints/faster_rcnn_r50_coco.pth \
   	TEST.CONTINUAL_DOMAIN "True" \
 	OUTPUT_DIR outputs/COCO/${bb}_direct_test
 
