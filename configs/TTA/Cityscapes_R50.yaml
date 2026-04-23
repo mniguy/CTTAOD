@@ -1,0 +1,77 @@
+_BASE_: "../Base/Cityscapes_faster_rcnn_R50_FPN_1x.yaml"
+
+MODEL:
+  # Path to a Faster R-CNN R50 FPN checkpoint trained on Cityscapes detection.
+  # Collect source stats first:
+  #   python tools/train_net.py --config-file configs/TTA/Cityscapes_R50.yaml \
+  #       --eval-only TEST.COLLECT_FEATURES True TEST.ONLINE_ADAPTATION False \
+  #       TEST.CONTINUAL_DOMAIN False
+  WEIGHTS: "./models/checkpoints/faster_rcnn_R50_cityscapes.pth"
+
+DATASETS:
+  TEST: ("cityscapes_det_val",)
+
+SOLVER:
+  IMS_PER_BATCH_TEST: 4
+  BASE_LR: 0.001
+  TYPE: "SGD"
+  MOMENTUM: 0.9
+  WEIGHT_DECAY: 0.0001
+  NESTEROV: False
+  CLIP_GRADIENTS:
+    ENABLED: True
+    CLIP_VALUE: 5.0
+
+TEST:
+  ONLINE_ADAPTATION: True
+  CONTINUAL_DOMAIN: True
+  # Enable eval-matrix mode (Exp 0/1/2/4 – handled in train_net.py routing)
+  EVAL_MATRIX: True
+  COLLECT_FEATURES: False
+  COLLECT_IOU_THR: 0.5
+
+  ADAPTATION:
+    CONTINUAL: True
+    WHERE: "adapter"           # only adapter parameters are updated
+    TYPE: null                 # no mean-teacher; set "mean-teacher" if needed
+    SOURCE_FEATS_PATH: "./models/stats/Cityscapes_R50_stats.pt"
+    GLOBAL_ALIGN: "KL"
+    FOREGROUND_ALIGN: "KL"
+    ALPHA_GLOBAL: 1.0
+    ALPHA_FOREGROUND: 1.0
+    WEIGHT_REG: 0.0
+    TH_BG: 0.5
+    EMA_GAMMA: 128
+    EMA_BETA: 0.99
+    FREQ_WEIGHT: True
+    SKIP_REDUNDANT: null
+    SKIP_THRESHOLD: 0.99
+    SKIP_PERIOD: 10
+    VALIDATION: False
+
+    # ── ASRI: Source Residual Injection ──────────────────────────────────
+    # μ̃_te^{k,t} = (1-ASRI_ALPHA)*μ_te^{k,t} + ASRI_ALPHA*μ_tr^k
+    # Set to 0.0 for baseline CTTAOD (no injection).
+    ASRI_ALPHA: 0.0
+    # Exp 1 Variant A: reset adapter weights at each domain boundary
+    ADAPTER_RESET: False
+    # Exp 1 Variant B: always use source prototype (equivalent to ASRI_ALPHA=1.0)
+    ORACLE_PROTOTYPE: False
+
+    # Exp 4: Stochastic Restoration (CoTTA-style)
+    STOCHASTIC_RESTORE: False
+    STOCHASTIC_RESTORE_PROB: 0.01
+
+    # Exp 4: EWC-style adapter regularization
+    EWC_LAMBDA: 0.0
+    EWC_FISHER_PATH: null
+
+    # Exp 4: Prototype Replay Buffer (last N domain prototypes)
+    PROTOTYPE_REPLAY: False
+    PROTOTYPE_REPLAY_BUFFER_SIZE: 3
+
+  ADAPTER:
+    TYPE: "parallel"
+    BOTTLENECK: 64
+
+OUTPUT_DIR: "./outputs/Cityscapes_TTA/exp0_baseline"
