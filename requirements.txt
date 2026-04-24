@@ -1,5 +1,4 @@
 # Build dependencies must come first (needed at compile time by other packages)
---no-build-isolation
 numpy==1.23.3
 Cython==0.29.32
 pybind11==2.12.0
