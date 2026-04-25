@@ -5,7 +5,10 @@ import pprint
 import sys
 from collections.abc import Mapping
 
-import wandb
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 
 def print_csv_format(results):

@@ -799,9 +799,6 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
         print(elapsed_time)
         logger.info('Elapsed Time: {}'.format(','.join([str(int(v)) for v in list(elapsed_time.values())])))
         logger.info('Avg FPS: {:.3f}s'.format(total_sample_num / sum(list(elapsed_time.values()))))
-        if len(results) == 1:
-            results = list(results.values())[0]
-        
         if cfg.TEST.ADAPTATION.VALIDATION:
             model.online_adapt = False
             eval_model = teacher_model if cfg.TEST.ADAPTATION.TYPE == 'mean-teacher' else model
@@ -809,7 +806,9 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
             if wandb is not None:
                 wandb.log({'end-mAP': val_results['bbox']['AP'], 'end-mAP50': val_results['bbox']['AP50']}, step=int((d_idx + 2) * len(data_loader) * cfg.SOLVER.IMS_PER_BATCH_TEST))
                 model.online_adapt = False if cfg.TEST.ADAPTATION.TYPE == 'mean-teacher' else True
-        print('Online mAP50:{}'.format(','.join([results[k]['mAP50'] for k in results])))
+        print('Online mAP50:{}'.format(','.join([str(results[k]['bbox']['AP50']) for k in results])))
+        if len(results) == 1:
+            results = list(results.values())[0]
         return results, backward_num
 
     # ------------------------------------------------------------------

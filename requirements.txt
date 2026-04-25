@@ -1,7 +1,7 @@
 # Build dependencies must come first (needed at compile time by other packages)
-numpy==1.23.3
-Cython==0.29.32
-pybind11==2.12.0
+numpy>=1.23
+Cython>=3.0
+pybind11>=2.12.0
 
 # PyTorch: install separately BEFORE running this file, matching your CUDA version.
 # e.g. CUDA 12/13: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
@@ -25,7 +25,7 @@ black==22.3.0
 cachetools==5.2.0
 certifi==2022.9.24
 click==8.1.3
-clip @ git+https://github.com/openai/CLIP.git@d50d76daa670286dd6cacf3bcd80b5e4823fc8e1
+# clip: installed separately in install_deps.sh (Step 3b) to avoid pkg_resources issues
 cloudpickle==2.2.0
 dataclasses==0.6
 docker-pycreds==0.4.0
@@ -58,12 +58,12 @@ Jinja2==3.1.2
 joblib==1.2.0
 lazy_loader==0.2
 linkify-it-py==1.0.3
-llvmlite==0.40.0
+llvmlite>=0.41.0
 lvis==0.5.3
 Markdown==3.4.1
 markdown-it-py==2.1.0
 MarkupSafe==2.1.1
-matplotlib==3.7.2
+matplotlib>=3.8.0
 mdit-py-plugins==0.3.1
 mdurl==0.1.2
 mss==6.1.0
@@ -72,12 +72,12 @@ munkres==1.1.4
 mypy-extensions==0.4.3
 networkx==3.1
 nltk==3.7
-numba==0.57.0
+numba>=0.58.0
 oauthlib==3.2.1
 omegaconf==2.2.3
-opencv-python==4.6.0.66
-orjson==3.8.0
-pandas==1.5.0
+opencv-python>=4.7.0
+orjson>=3.9.0
+pandas>=2.0.0
 paramiko==2.11.0
 pathspec==0.10.1
 pathtools==0.1.2
@@ -90,7 +90,7 @@ psutil==5.9.5
 py-cpuinfo==8.0.0
 pyasn1==0.4.8
 pyasn1-modules==0.2.8
-pycocotools==2.0.5
+pycocotools>=2.0.7
 pycryptodome==3.15.0
 pydantic==1.10.2
 pydot==1.4.2
@@ -105,9 +105,9 @@ regex==2022.9.13
 requests-oauthlib==1.3.1
 rfc3986==1.5.0
 rsa==4.9
-scikit-image==0.20.0
-scikit-learn==1.1.2
-scipy==1.9.1
+scikit-image>=0.21.0
+scikit-learn>=1.2.0
+scipy>=1.11.0
 sentry-sdk==1.24.0
 setproctitle==1.3.2
 smmap==5.0.0

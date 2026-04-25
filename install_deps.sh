@@ -31,14 +31,27 @@ else
     echo "Already patched or not needed, skipping."
 fi
 
-# ── Step 3: requirements.txt ─────────────────────────────────────────────────
-# --no-build-isolation: lets pip reuse already-installed torch during git-based
-# package builds (e.g. clip), instead of creating an empty isolated env.
-echo "=== Step 3: Install requirements ==="
+# ── Step 3: Pin setuptools for pkg_resources compatibility ───────────────────
+# setuptools ≥80 removed pkg_resources from its distribution.
+# CLIP's setup.py uses pkg_resources.parse_requirements(), so we pin to <80.
+echo "=== Step 3: Pin setuptools for CLIP compatibility ==="
+pip install 'setuptools<80' wheel
+
+# ── Step 3b: Install CLIP separately ─────────────────────────────────────────
+# CLIP uses pkg_resources in setup.py and must be installed before the main
+# requirements.txt (where it is commented out) to avoid build-isolation issues.
+echo "=== Step 3b: Install CLIP ==="
+pip install --no-build-isolation \
+    git+https://github.com/openai/CLIP.git@d50d76daa670286dd6cacf3bcd80b5e4823fc8e1
+
+# ── Step 4: requirements.txt ─────────────────────────────────────────────────
+# --no-build-isolation: lets pip reuse already-installed torch/numpy during
+# C-extension builds (pycocotools, etc.).
+echo "=== Step 4: Install requirements ==="
 pip install --no-build-isolation -r requirements.txt
 
-# ── Step 4: detectron2 (editable) ────────────────────────────────────────────
-echo "=== Step 4: Install detectron2 ==="
+# ── Step 5: detectron2 (editable) ────────────────────────────────────────────
+echo "=== Step 5: Install detectron2 ==="
 pip install --no-build-isolation -e .
 
 echo ""

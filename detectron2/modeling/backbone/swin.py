@@ -26,7 +26,10 @@ from detectron2.layers import ShapeSpec, LayerNorm
 from detectron2.config import CfgNode as CN
 
 import logging
-from tutel.impls.moe_layer import MOELayer
+try:
+    from tutel.impls.moe_layer import MOELayer
+except ImportError:
+    MOELayer = object  # tutel not installed; MOEAdapter unavailable but unused for non-MoE backbones
 
 _to_2tuple = nn.modules.utils._ntuple(2)
 
