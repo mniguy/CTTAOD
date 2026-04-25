@@ -21,6 +21,7 @@ CKPT="${1:-../models/checkpoints/faster_rcnn_r50_coco.pth}"
 CFG="../configs/TTA/COCO_R50.yaml"
 STATS_PATH="../models/stats/COCO_R50_stats.pt"
 
+export DETECTRON2_DATASETS="$ROOT/datasets"
 mkdir -p ../results/exp2
 
 ALPHAS="0.0 0.05 0.1 0.2 0.3 0.5 0.7 1.0"

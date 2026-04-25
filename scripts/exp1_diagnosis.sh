@@ -1,23 +1,16 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Exp 1: Forgetting Cause Diagnosis
+# Exp 0: Evaluation Protocol Setup (COCO → COCO-C)
 #
-# Runs three variants to isolate the cause of catastrophic forgetting:
-#
-#   Variant A — Adapter Reset + EMA Prototype (isolates prototype drift)
-#     - Reset adapter weights at each domain boundary
-#     - Keep EMA prototype running (no injection)
-#     → If BWT still bad: prototype drift is the main cause → ASRI is correct
-#
-#   Variant B — Adapter Continual + Oracle Prototype (isolates adapter drift)
-#     - Let adapters accumulate across domains (normal CTTAOD)
-#     - Replace target prototype with source prototype (ASRI_ALPHA=1.0)
-#     → If BWT still bad: adapter weight drift is the main cause
-#
-#   Baseline — from Exp 0 (already computed, just reference)
+# Runs three sub-experiments in order:
+#   (1) Collect source feature statistics from COCO val
+#   (2) Source-only baseline (no adaptation) evaluated on all 15 corruptions
+#   (3) Baseline CTTAOD: build full (T+1)×T evaluation matrix
 #
 # Usage:
-#   bash scripts/exp1_diagnosis.sh [CHECKPOINT_PATH]
+#   bash scripts/exp0_coco.sh [CHECKPOINT_PATH]
+#
+# CHECKPOINT_PATH defaults to ./models/checkpoints/faster_rcnn_r50_coco.pth
 # =============================================================================
 
 set -e
@@ -29,12 +22,61 @@ CKPT="${1:-../models/checkpoints/faster_rcnn_r50_coco.pth}"
 CFG="../configs/TTA/COCO_R50.yaml"
 STATS_PATH="../models/stats/COCO_R50_stats.pt"
 
-mkdir -p ../results/exp1
+export DETECTRON2_DATASETS="$ROOT/datasets"
+mkdir -p ../models/stats ../models/checkpoints ../results/exp0
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Variant A: Adapter Reset + EMA Prototype (no injection, adapter resets)
+# Step 1: Collect source feature statistics (COCO val, clean)
+# Skip this step if COCO_R50_stats.pt already exists (e.g. downloaded from Drive)
 # ─────────────────────────────────────────────────────────────────────────────
-echo "=== Exp 1 Variant A: Adapter Reset + EMA Prototype ==="
+if [ -f "$STATS_PATH" ]; then
+    echo "=== Step 1: Source stats already exist at $STATS_PATH — skipping collection ==="
+else
+    echo "=== Step 1: Collecting source feature statistics ==="
+    python train_net.py \
+        --config-file "$CFG" \
+        --eval-only \
+        MODEL.WEIGHTS "$CKPT" \
+        TEST.ONLINE_ADAPTATION False \
+        TEST.CONTINUAL_DOMAIN False \
+        TEST.COLLECT_FEATURES True \
+        TEST.EVAL_MATRIX False \
+        OUTPUT_DIR ../outputs/COCO_TTA/exp0_collect_stats
+
+    CKPT_BASE=$(basename "$CKPT" .pth)
+    mv "../models/${CKPT_BASE}_feature_stats_new.pt" "$STATS_PATH" 2>/dev/null || true
+    echo "Source stats saved to $STATS_PATH"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 2: Source-only baseline (no adaptation)
+#   Evaluates frozen source model on all 15 COCO-C corruptions.
+#   This produces row-0 of the evaluation matrix.
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== Step 2: Source-only baseline (no adaptation) ==="
+SOURCE_ONLY_LOG="../outputs/COCO_TTA/exp0_source_only/log.txt"
+if [ -f "$SOURCE_ONLY_LOG" ] && grep -q "coco_2017_val in csv format" "$SOURCE_ONLY_LOG"; then
+    echo "=== Step 2: Already complete — skipping ==="
+else
+python train_net.py \
+    --config-file "$CFG" \
+    --eval-only \
+    MODEL.WEIGHTS "$CKPT" \
+    TEST.ONLINE_ADAPTATION False \
+    TEST.CONTINUAL_DOMAIN True \
+    TEST.EVAL_MATRIX True \
+    TEST.ADAPTATION.ASRI_ALPHA 0.0 \
+    TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
+    OUTPUT_DIR ../outputs/COCO_TTA/exp0_source_only
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 3: Baseline CTTAOD — full evaluation matrix
+#   Adapter-only adaptation, continual, KL alignment, ASRI_ALPHA=0.0
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== Step 3: Baseline CTTAOD — full evaluation matrix ==="
 python train_net.py \
     --config-file "$CFG" \
     --eval-only \
@@ -47,59 +89,18 @@ python train_net.py \
     TEST.ADAPTATION.GLOBAL_ALIGN "KL" \
     TEST.ADAPTATION.FOREGROUND_ALIGN "KL" \
     TEST.ADAPTATION.ASRI_ALPHA 0.0 \
-    TEST.ADAPTATION.ORACLE_PROTOTYPE False \
-    TEST.ADAPTATION.ADAPTER_RESET True \
     TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
-    OUTPUT_DIR ../outputs/COCO_TTA/exp1_varA
+    OUTPUT_DIR ../outputs/COCO_TTA/exp0_baseline
 
-cp ../outputs/COCO_TTA/exp1_varA/eval_matrix/eval_matrix.npy \
-   ../results/exp1/eval_matrix_varA.npy 2>/dev/null || true
-cp ../outputs/COCO_TTA/exp1_varA/eval_matrix/metrics.json \
-   ../results/exp1/metrics_varA.json 2>/dev/null || true
+cp ../outputs/COCO_TTA/exp0_baseline/eval_matrix/eval_matrix.npy \
+   ../results/exp0/eval_matrix_baseline.npy 2>/dev/null || true
+cp ../outputs/COCO_TTA/exp0_baseline/eval_matrix/eval_matrix_per_class.npy \
+   ../results/exp0/eval_matrix_baseline_per_class.npy 2>/dev/null || true
+cp ../outputs/COCO_TTA/exp0_baseline/eval_matrix/metrics.json \
+   ../results/exp0/metrics_baseline.json 2>/dev/null || true
+cp ../outputs/COCO_TTA/exp0_source_only/eval_matrix/eval_matrix.npy \
+   ../results/exp0/eval_matrix_source_only.npy 2>/dev/null || true
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Variant B: Adapter Continual + Oracle Prototype (ASRI_ALPHA=1.0)
-# ─────────────────────────────────────────────────────────────────────────────
 echo ""
-echo "=== Exp 1 Variant B: Adapter Continual + Oracle Prototype (ASRI α=1.0) ==="
-python train_net.py \
-    --config-file "$CFG" \
-    --eval-only \
-    MODEL.WEIGHTS "$CKPT" \
-    TEST.ONLINE_ADAPTATION True \
-    TEST.CONTINUAL_DOMAIN True \
-    TEST.EVAL_MATRIX True \
-    TEST.ADAPTATION.CONTINUAL True \
-    TEST.ADAPTATION.WHERE "adapter" \
-    TEST.ADAPTATION.GLOBAL_ALIGN "KL" \
-    TEST.ADAPTATION.FOREGROUND_ALIGN "KL" \
-    TEST.ADAPTATION.ASRI_ALPHA 1.0 \
-    TEST.ADAPTATION.ORACLE_PROTOTYPE True \
-    TEST.ADAPTATION.ADAPTER_RESET False \
-    TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
-    OUTPUT_DIR ../outputs/COCO_TTA/exp1_varB
-
-cp ../outputs/COCO_TTA/exp1_varB/eval_matrix/eval_matrix.npy \
-   ../results/exp1/eval_matrix_varB.npy 2>/dev/null || true
-cp ../outputs/COCO_TTA/exp1_varB/eval_matrix/metrics.json \
-   ../results/exp1/metrics_varB.json 2>/dev/null || true
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Print diagnosis summary
-# ─────────────────────────────────────────────────────────────────────────────
-echo ""
-echo "=== Exp 1 Diagnosis Summary ==="
-echo ""
-echo "--- Baseline CTTAOD ---"
-cat ../results/exp0/metrics_baseline.json 2>/dev/null || echo "(run exp0 first)"
-echo ""
-echo "--- Variant A (Adapter Reset) ---"
-cat ../results/exp1/metrics_varA.json 2>/dev/null || true
-echo ""
-echo "--- Variant B (Oracle Prototype) ---"
-cat ../results/exp1/metrics_varB.json 2>/dev/null || true
-echo ""
-echo "Interpretation:"
-echo "  If VarA BWT << 0 but VarB BWT ≈ 0  → Prototype drift is the main cause → ASRI is correct"
-echo "  If VarA BWT ≈ 0 but VarB BWT << 0  → Adapter interference is the main cause"
-echo "  If both bad                         → Both contribute"
+echo "=== Exp 0 complete. Results in results/exp0/ ==="
+cat ../results/exp0/metrics_baseline.json 2>/dev/null || true

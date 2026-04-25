@@ -22,6 +22,7 @@ CKPT="${1:-../models/checkpoints/faster_rcnn_r50_coco.pth}"
 CFG="../configs/TTA/COCO_R50.yaml"
 STATS_PATH="../models/stats/COCO_R50_stats.pt"
 
+export DETECTRON2_DATASETS="$ROOT/datasets"
 mkdir -p ../models/stats ../models/checkpoints ../results/exp0
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,6 +55,10 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Step 2: Source-only baseline (no adaptation) ==="
+SOURCE_ONLY_LOG="../outputs/COCO_TTA/exp0_source_only/log.txt"
+if [ -f "$SOURCE_ONLY_LOG" ] && grep -q "coco_2017_val in csv format" "$SOURCE_ONLY_LOG"; then
+    echo "=== Step 2: Already complete — skipping ==="
+else
 python train_net.py \
     --config-file "$CFG" \
     --eval-only \
@@ -64,6 +69,7 @@ python train_net.py \
     TEST.ADAPTATION.ASRI_ALPHA 0.0 \
     TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
     OUTPUT_DIR ../outputs/COCO_TTA/exp0_source_only
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 3: Baseline CTTAOD — full evaluation matrix
