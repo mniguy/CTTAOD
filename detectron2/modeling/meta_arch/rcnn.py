@@ -51,6 +51,8 @@ class GeneralizedRCNN(nn.Module):
         collect_iou_thr: float = 0.5,
         source_feat_stats=None,
         ema_gamma: int = 128,
+        ema_beta: float = 0.0,
+        dpema_apply_gl: bool = True,
         freq_weight: bool = False,
         skip_tau: float = 1.0,
         asri_alpha: float = 0.0,
@@ -109,6 +111,8 @@ class GeneralizedRCNN(nn.Module):
             self.template_cov["fg"] = {}
             self.ema_n = {}
         self.ema_gamma = ema_gamma
+        self.ema_beta = ema_beta
+        self.dpema_apply_gl = dpema_apply_gl
         self.freq_weight = freq_weight
         self.skip_tau = skip_tau
         # ASRI: Adaptive Source Residual Injection
@@ -136,6 +140,8 @@ class GeneralizedRCNN(nn.Module):
             "collect_iou_thr": cfg.TEST.COLLECT_IOU_THR,
             "source_feat_stats": cfg.TEST.ADAPTATION.SOURCE_FEATS_PATH,
             "ema_gamma": cfg.TEST.ADAPTATION.EMA_GAMMA,
+            "ema_beta": cfg.TEST.ADAPTATION.EMA_BETA,
+            "dpema_apply_gl": cfg.TEST.ADAPTATION.DPEMA_APPLY_GL,
             "freq_weight": cfg.TEST.ADAPTATION.FREQ_WEIGHT,
             "skip_tau": cfg.TEST.ADAPTATION.SKIP_TAU,
             "asri_alpha": cfg.TEST.ADAPTATION.ASRI_ALPHA,
@@ -328,17 +334,32 @@ class GeneralizedRCNN(nn.Module):
                     #feature_sim['fg-{}'.format(str(k))] = F.cosine_similarity(self.t_stats["fg"][k][0].reshape(1, -1),
                     #                    cur_feats.mean(dim=0).reshape(1, -1)).item()
                     self.ema_n[k] += cur_feats.shape[0]
-                    diff = cur_feats - self.t_stats["fg"][k][0][None, :].to(self.device)
-                    delta = 1 / self.ema_gamma * diff.sum( dim=0)
-                    cur_target_mean = self.t_stats["fg"][k][0].to(self.device) + delta
+                    N = cur_feats.shape[0]
 
-                    # ── ASRI: source residual injection ───────────────────────
+                    # ── Prototype EMA (raw, stored to t_stats) ────────────────
+                    if self.ema_beta > 0.0:
+                        # DPEMA: exponential decay per detection instance
+                        effective_beta = self.ema_beta ** N
+                        raw_updated_mean = (effective_beta * self.t_stats["fg"][k][0].to(self.device)
+                                            + (1.0 - effective_beta) * cur_feats.mean(dim=0))
+                    else:
+                        # legacy gamma method (backward compat)
+                        diff = cur_feats - self.t_stats["fg"][k][0][None, :].to(self.device)
+                        delta = 1 / self.ema_gamma * diff.sum(dim=0)
+                        raw_updated_mean = self.t_stats["fg"][k][0].to(self.device) + delta
+
+                    # store raw EMA only — ASRI not reflected in t_stats
+                    self.t_stats["fg"][k] = (raw_updated_mean.detach(), None)
+
+                    # ── ASRI: applied at loss-time only, not stored ────────────
                     # μ̃_te^{k,t} = (1-α)*μ_te^{k,t} + α*μ_tr^k
                     # oracle_prototype (Exp 1 Var B) forces α=1 regardless of asri_alpha
                     _alpha = 1.0 if self.oracle_prototype else self.asri_alpha
                     if _alpha > 0.0 and self.s_stats is not None:
                         src_mean = self.s_stats["fg"][k][0].to(self.device)
-                        cur_target_mean = (1.0 - _alpha) * cur_target_mean + _alpha * src_mean
+                        cur_target_mean = (1.0 - _alpha) * raw_updated_mean + _alpha * src_mean
+                    else:
+                        cur_target_mean = raw_updated_mean
                     # ──────────────────────────────────────────────────────────
 
                     t_dist = torch.distributions.MultivariateNormal(cur_target_mean, self.s_stats["fg"][k][1].to(self.device) + self.template_cov["fg"][k].to(self.device))
@@ -353,8 +374,6 @@ class GeneralizedRCNN(nn.Module):
                                              + torch.distributions.kl.kl_divergence(t_dist, s_dist)) / 2
                     if cur_loss_fg_align < 10**5:
                         loss_fg_align += cur_loss_fg_align
-                        #self.t_stats["fg"][k] = (cur_target_mean.detach(), cur_target_cov.detach())
-                        self.t_stats["fg"][k] = (cur_target_mean.detach(), None)
                         loss_n += 1
 
             if loss_n > 0:
@@ -365,19 +384,24 @@ class GeneralizedRCNN(nn.Module):
             if self.gl_align == "KL":
                 for k in features.keys():
                     cur_feats = features[k].mean(dim=[2, 3])
-                    #feature_sim['gl-{}'.format(k)] = F.cosine_similarity(self.t_stats["gl"][k][0].reshape(1, -1),
-                    #                    cur_feats.mean(dim=0).reshape(1, -1)).item()
-                    diff = cur_feats - self.t_stats["gl"][k][0][None, :].to(self.device)
-                    delta = 1 / self.ema_gamma * diff.sum(dim=0)
-                    cur_target_mean = self.t_stats["gl"][k][0].to(self.device) + delta
-                    #cur_target_cov = self.t_stats["gl"][k][1].to(self.device) + 1 / self.ema_gamma * (diff.t() @ diff - self.t_stats["gl"][k][1].to(self.device) * cur_feats.shape[0]) - delta.reshape(-1,1) @ delta.reshape(1,-1)
-                    # t_dist = torch.distributions.MultivariateNormal(cur_target_mean, cur_target_cov + self.template_cov["gl"][k].to(self.device))
+                    N = cur_feats.shape[0]
+
+                    if self.dpema_apply_gl and self.ema_beta > 0.0:
+                        # DPEMA for global branch
+                        effective_beta = self.ema_beta ** N
+                        cur_target_mean = (effective_beta * self.t_stats["gl"][k][0].to(self.device)
+                                           + (1.0 - effective_beta) * cur_feats.mean(dim=0))
+                    else:
+                        # legacy gamma method
+                        diff = cur_feats - self.t_stats["gl"][k][0][None, :].to(self.device)
+                        delta = 1 / self.ema_gamma * diff.sum(dim=0)
+                        cur_target_mean = self.t_stats["gl"][k][0].to(self.device) + delta
+
                     t_dist = torch.distributions.MultivariateNormal(cur_target_mean, self.s_stats["gl"][k][1].to(self.device) + self.template_cov["gl"][k].to(self.device))
                     s_dist = torch.distributions.MultivariateNormal(self.s_stats["gl"][k][0].to(self.device), self.s_stats["gl"][k][1].to(self.device) + self.template_cov["gl"][k].to(self.device))
                     cur_loss_gl_align = (torch.distributions.kl.kl_divergence(s_dist, t_dist) + torch.distributions.kl.kl_divergence(t_dist, s_dist)) / 2
                     if cur_loss_gl_align < 10 ** 5:
                         loss_gl_align += cur_loss_gl_align
-                        #self.t_stats["gl"][k] = (cur_target_mean.detach(), cur_target_cov.detach())
                         self.t_stats["gl"][k] = (cur_target_mean.detach(), None)
             elif self.gl_align == "bn_stats":
                 cur_bn_stats = [(l.mean, l.var) for l in list(self.backbone.bottom_up.modules()) if (isinstance(l, FrozenBatchNorm2d) or isinstance(l, LayerNorm)) and l.out_batch_norm]
