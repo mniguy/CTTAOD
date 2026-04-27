@@ -1,0 +1,54 @@
+# Vast.ai-ready image: CUDA 12.4 + PyTorch 2.x
+# Build:  docker build -t cttaod:latest -f docker/Dockerfile.vastai .
+# Run:    docker run --gpus all -it --ipc=host \
+#           -v /path/to/data:/workspace/datasets \
+#           -v /path/to/models:/workspace/models \
+#           cttaod:latest
+
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV FORCE_CUDA=1
+# Build kernels for the most common Ampere/Ada/Hopper cards on Vast.ai.
+# Add older arches (7.5 for Turing, 6.1 for Pascal) if you rent those.
+ARG TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0"
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}"
+
+# System packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git wget curl ninja-build \
+        libgl1-mesa-glx libglib2.0-0 libsm6 libxrender1 libxext6 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# ── Step 1: Pin setuptools so CLIP's setup.py (pkg_resources) works ──────────
+RUN pip install --no-cache-dir 'setuptools<80' wheel
+
+# ── Step 2: Build dependencies ────────────────────────────────────────────────
+RUN pip install --no-cache-dir numpy>=1.23 Cython>=3.0 pybind11>=2.12.0
+
+# ── Step 3: CLIP ──────────────────────────────────────────────────────────────
+RUN pip install --no-cache-dir --no-build-isolation \
+    git+https://github.com/openai/CLIP.git@d50d76daa670286dd6cacf3bcd80b5e4823fc8e1
+
+# ── Step 4: Copy project and install requirements ────────────────────────────
+COPY requirements.txt /workspace/requirements.txt
+RUN pip install --no-cache-dir --no-build-isolation -r /workspace/requirements.txt
+
+# ── Step 5: Install detectron2 (compiles CUDA extensions) ─────────────────────
+COPY detectron2 /workspace/detectron2
+COPY setup.py setup.cfg /workspace/
+COPY configs /workspace/configs
+COPY tools /workspace/tools
+
+RUN pip install --no-cache-dir --no-build-isolation -e /workspace
+
+# ── Step 6: Copy remaining project files ─────────────────────────────────────
+COPY scripts /workspace/scripts
+COPY models /workspace/models 2>/dev/null || true
+
+ENV FVCORE_CACHE=/tmp
+ENV PYTHONPATH=/workspace
+
+CMD ["bash"]
