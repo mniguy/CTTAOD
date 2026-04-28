@@ -807,6 +807,15 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
                 wandb.log({'end-mAP': val_results['bbox']['AP'], 'end-mAP50': val_results['bbox']['AP50']}, step=int((d_idx + 2) * len(data_loader) * cfg.SOLVER.IMS_PER_BATCH_TEST))
                 model.online_adapt = False if cfg.TEST.ADAPTATION.TYPE == 'mean-teacher' else True
         print('Online mAP50:{}'.format(','.join([str(results[k]['bbox']['AP50']) for k in results])))
+
+        if comm.is_main_process():
+            import json as _json
+            out_dir = os.path.join(cfg.OUTPUT_DIR, "eval_matrix")
+            os.makedirs(out_dir, exist_ok=True)
+            flat_metrics = {k: v.get("bbox", v) for k, v in results.items()}
+            with open(os.path.join(out_dir, "metrics.json"), "w") as _f:
+                _json.dump(flat_metrics, _f, indent=2)
+
         if len(results) == 1:
             results = list(results.values())[0]
         return results, backward_num

@@ -30,7 +30,7 @@ fairscale==0.4.11
 timm==0.5.4
 torch-kmeans==0.2.0
 scikit-learn>=1.2.0
-scikit-image>=0.21.0
+scikit-image>=0.25.0
 scipy>=1.11.0
 
 # Vision / data

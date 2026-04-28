@@ -48,7 +48,29 @@ pip install --no-build-isolation \
 # --no-build-isolation: lets pip reuse already-installed torch/numpy during
 # C-extension builds (pycocotools, etc.).
 echo "=== Step 4: Install requirements ==="
-pip install --no-build-isolation -r requirements.txt
+pip install --no-build-isolation --no-cache-dir -r requirements.txt
+
+# ── Step 4.5: Symlink nvidia pip-package headers into CUDA include dir ────────
+# Vast.ai instances ship CUDA 13.x runtime-only (no full toolkit headers).
+# PyTorch pip wheels bundle headers like cusparse.h inside nvidia-* packages,
+# but NVCC only searches /usr/local/cuda/include — so detectron2's C++ build
+# fails with "fatal error: cusparse.h: No such file or directory".
+# Fix: symlink every header from the installed nvidia packages into CUDA include.
+echo "=== Step 4.5: Symlink nvidia package headers into CUDA include ==="
+CUDA_INC=$(python3 -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), '../../nvidia'))" 2>/dev/null)
+if [ -z "$CUDA_INC" ]; then
+    echo "Could not locate nvidia packages, skipping."
+else
+    for inc_dir in "$CUDA_INC"/*/include; do
+        [ -d "$inc_dir" ] || continue
+        for header in "$inc_dir"/*.h "$inc_dir"/*.hpp; do
+            [ -f "$header" ] || continue
+            dest="/usr/local/cuda/include/$(basename "$header")"
+            [ -e "$dest" ] || ln -s "$header" "$dest"
+        done
+    done
+    echo "Done symlinking headers from $CUDA_INC"
+fi
 
 # ── Step 5: detectron2 (editable) ────────────────────────────────────────────
 echo "=== Step 5: Install detectron2 ==="

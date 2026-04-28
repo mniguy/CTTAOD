@@ -99,9 +99,15 @@ PYEOF
 
 echo "Best β* from Run 1: $BEST_BETA"
 
+if [ -z "$BEST_BETA" ] || [ "$BEST_BETA" = "None" ]; then
+    echo "ERROR: Could not determine best β from Run 1 (no results found). Skipping Run 2."
+    BEST_BETA=""
+fi
+
 ALPHAS="0.1 0.2 0.3 0.5"
 
 for ALPHA in $ALPHAS; do
+    [ -n "$BEST_BETA" ] || { echo "Skipping Run 2 (no valid best β)."; break; }
     ALPHA_TAG=$(echo "$ALPHA" | sed 's/\./_/g')
     BETA_TAG=$(echo "$BEST_BETA" | sed 's/\./_/g')
 
