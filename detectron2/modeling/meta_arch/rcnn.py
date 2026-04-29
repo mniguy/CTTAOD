@@ -19,18 +19,13 @@ from ..proposal_generator import build_proposal_generator
 from ..roi_heads import build_roi_heads
 from .build import META_ARCH_REGISTRY
 
-__all__ = ["GeneralizedRCNN_AdaptiveASRI"]
+__all__ = ["GeneralizedRCNN", "ProposalNetwork"]
 
 
 @META_ARCH_REGISTRY.register()
-class GeneralizedRCNN_AdaptiveASRI(nn.Module):
+class GeneralizedRCNN(nn.Module):
     """
-    Generalized R-CNN with Adaptive ASRI (source-variance-normalized distance).
-    Identical to GeneralizedRCNN except α is computed as:
-        α_t = asri_alpha / (1 + ||μ_te - μ_tr|| / sqrt(tr(Σ_tr)/d))
-    when ASRI_ADAPTIVE=True. Falls back to fixed α when False.
-
-    Any models that contains the following three components:
+    Generalized R-CNN. Any models that contains the following three components:
     1. Per-image feature extraction (aka backbone)
     2. Region proposal generation
     3. Per-region feature extraction and prediction
@@ -62,7 +57,6 @@ class GeneralizedRCNN_AdaptiveASRI(nn.Module):
         skip_tau: float = 1.0,
         asri_alpha: float = 0.0,
         oracle_prototype: bool = False,
-        asri_adaptive: bool = False,
     ):
         """
         Args:
@@ -125,7 +119,6 @@ class GeneralizedRCNN_AdaptiveASRI(nn.Module):
         # μ̃_te^{k,t} = (1-asri_alpha)*μ_te^{k,t} + asri_alpha*μ_tr^k
         self.asri_alpha = asri_alpha
         self.oracle_prototype = oracle_prototype  # Exp 1 Variant B: force alpha=1
-        self.asri_adaptive = asri_adaptive
 
     @classmethod
     def from_config(cls, cfg):
@@ -153,7 +146,6 @@ class GeneralizedRCNN_AdaptiveASRI(nn.Module):
             "skip_tau": cfg.TEST.ADAPTATION.SKIP_TAU,
             "asri_alpha": cfg.TEST.ADAPTATION.ASRI_ALPHA,
             "oracle_prototype": cfg.TEST.ADAPTATION.ORACLE_PROTOTYPE,
-            "asri_adaptive": cfg.TEST.ADAPTATION.ASRI_ADAPTIVE,
         }
 
     def initialize(self):
@@ -362,18 +354,7 @@ class GeneralizedRCNN_AdaptiveASRI(nn.Module):
                     # ── ASRI: applied at loss-time only, not stored ────────────
                     # μ̃_te^{k,t} = (1-α)*μ_te^{k,t} + α*μ_tr^k
                     # oracle_prototype (Exp 1 Var B) forces α=1 regardless of asri_alpha
-                    if self.oracle_prototype:
-                        _alpha = 1.0
-                    elif self.asri_adaptive and self.s_stats is not None:
-                        # α_t = asri_alpha / (1 + dist_normalized)
-                        # dist_normalized = ||μ_te - μ_tr|| / sqrt(tr(Σ_tr) / d)
-                        src_mean = self.s_stats["fg"][k][0].to(self.device)
-                        src_cov = self.s_stats["fg"][k][1].to(self.device)
-                        src_std = (src_cov.diagonal().mean()).sqrt().clamp(min=1e-6)
-                        dist_normalized = torch.dist(raw_updated_mean.detach(), src_mean) / src_std
-                        _alpha = self.asri_alpha / (1.0 + dist_normalized.item())
-                    else:
-                        _alpha = self.asri_alpha
+                    _alpha = 1.0 if self.oracle_prototype else self.asri_alpha
                     if _alpha > 0.0 and self.s_stats is not None:
                         src_mean = self.s_stats["fg"][k][0].to(self.device)
                         cur_target_mean = (1.0 - _alpha) * raw_updated_mean + _alpha * src_mean
@@ -435,7 +416,7 @@ class GeneralizedRCNN_AdaptiveASRI(nn.Module):
 
         if do_postprocess:
             assert not torch.jit.is_scripting(), "Scripting is not supported for postprocess."
-            return GeneralizedRCNN_AdaptiveASRI._postprocess(results, batched_inputs, images.image_sizes), adapt_loss, feature_sim
+            return GeneralizedRCNN._postprocess(results, batched_inputs, images.image_sizes), adapt_loss, feature_sim
         return results, adapt_loss, feature_sim
 
     def collect_feats(
@@ -525,7 +506,7 @@ class GeneralizedRCNN_AdaptiveASRI(nn.Module):
 
         if do_postprocess:
             assert not torch.jit.is_scripting(), "Scripting is not supported for postprocess."
-            return GeneralizedRCNN_AdaptiveASRI._postprocess(results, batched_inputs, images.image_sizes)
+            return GeneralizedRCNN._postprocess(results, batched_inputs, images.image_sizes)
         return results
 
     def inference(
@@ -580,7 +561,7 @@ class GeneralizedRCNN_AdaptiveASRI(nn.Module):
 
         if do_postprocess:
             assert not torch.jit.is_scripting(), "Scripting is not supported for postprocess."
-            return GeneralizedRCNN_AdaptiveASRI._postprocess(results, batched_inputs, images.image_sizes)
+            return GeneralizedRCNN._postprocess(results, batched_inputs, images.image_sizes)
         return results
 
     def preprocess_image(self, batched_inputs: List[Dict[str, torch.Tensor]]):
@@ -630,3 +611,92 @@ class GeneralizedRCNN_AdaptiveASRI(nn.Module):
         return processed_results
 
 
+@META_ARCH_REGISTRY.register()
+class ProposalNetwork(nn.Module):
+    """
+    A meta architecture that only predicts object proposals.
+    """
+
+    @configurable
+    def __init__(
+        self,
+        *,
+        backbone: Backbone,
+        proposal_generator: nn.Module,
+        pixel_mean: Tuple[float],
+        pixel_std: Tuple[float],
+    ):
+        """
+        Args:
+            backbone: a backbone module, must follow detectron2's backbone interface
+            proposal_generator: a module that generates proposals using backbone features
+            pixel_mean, pixel_std: list or tuple with #channels element, representing
+                the per-channel mean and std to be used to normalize the input image
+        """
+        super().__init__()
+        self.backbone = backbone
+        self.proposal_generator = proposal_generator
+        self.register_buffer("pixel_mean", torch.tensor(pixel_mean).view(-1, 1, 1), False)
+        self.register_buffer("pixel_std", torch.tensor(pixel_std).view(-1, 1, 1), False)
+
+    @classmethod
+    def from_config(cls, cfg):
+        backbone = build_backbone(cfg)
+        return {
+            "backbone": backbone,
+            "proposal_generator": build_proposal_generator(cfg, backbone.output_shape()),
+            "pixel_mean": cfg.MODEL.PIXEL_MEAN,
+            "pixel_std": cfg.MODEL.PIXEL_STD,
+        }
+
+    @property
+    def device(self):
+        return self.pixel_mean.device
+
+    def _move_to_current_device(self, x):
+        return move_device_like(x, self.pixel_mean)
+
+    def forward(self, batched_inputs):
+        """
+        Args:
+            Same as in :class:`GeneralizedRCNN.forward`
+
+        Returns:
+            list[dict]:
+                Each dict is the output for one input image.
+                The dict contains one key "proposals" whose value is a
+                :class:`Instances` with keys "proposal_boxes" and "objectness_logits".
+        """
+        images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
+        images = [(x - self.pixel_mean) / self.pixel_std for x in images]
+        images = ImageList.from_tensors(
+            images,
+            self.backbone.size_divisibility,
+            padding_constraints=self.backbone.padding_constraints,
+        )
+        features = self.backbone(images.tensor)
+
+        if "instances" in batched_inputs[0]:
+            gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
+        elif "targets" in batched_inputs[0]:
+            log_first_n(
+                logging.WARN, "'targets' in the model inputs is now renamed to 'instances'!", n=10
+            )
+            gt_instances = [x["targets"].to(self.device) for x in batched_inputs]
+        else:
+            gt_instances = None
+        proposals, proposal_losses = self.proposal_generator(images, features, gt_instances)
+        # In training, the proposals are not useful at all but we generate them anyway.
+        # This makes RPN-only models about 5% slower.
+        if self.training:
+            return proposal_losses
+
+        processed_results = []
+        for results_per_image, input_per_image, image_size in zip(
+            proposals, batched_inputs, images.image_sizes
+        ):
+            height = input_per_image.get("height", image_size[0])
+            width = input_per_image.get("width", image_size[1])
+            r = detector_postprocess(results_per_image, height, width)
+            processed_results.append({"proposals": r})
+        return processed_results
