@@ -694,6 +694,8 @@ _C.TEST.ADAPTATION.BN_SOURCE_NUM = 128
 # μ̃_te^{k,t} = (1-ASRI_ALPHA)*μ_te^{k,t} + ASRI_ALPHA*μ_tr^k
 # 0.0 = baseline CTTAOD (no injection); 1.0 = oracle (always use source proto)
 _C.TEST.ADAPTATION.ASRI_ALPHA = 0.0
+# If True, α is computed as asri_alpha / (1 + ||μ_te - μ_tr|| / sqrt(tr(Σ_tr)/d))
+_C.TEST.ADAPTATION.ASRI_ADAPTIVE = False
 
 # Exp 1 Variant A: reset adapter weights to source-init at each domain boundary
 _C.TEST.ADAPTATION.ADAPTER_RESET = False
