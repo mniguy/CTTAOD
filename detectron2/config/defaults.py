@@ -697,6 +697,14 @@ _C.TEST.ADAPTATION.ASRI_ALPHA = 0.0
 # If True, α is computed as asri_alpha / (1 + ||μ_te - μ_tr|| / sqrt(tr(Σ_tr)/d))
 _C.TEST.ADAPTATION.ASRI_ADAPTIVE = False
 
+# ── Sliding Window EMA (SWEMA) ────────────────────────────────────────────────
+# μ̃ = (1 - SWEMA_ALPHA) * μ_te_recent + SWEMA_ALPHA * μ_tr
+# μ_te_recent: EMA over only the most recent SWEMA_K steps (windowed)
+# SWEMA_ALPHA: weight of source anchor (0 = no anchor, 1 = source only)
+# SWEMA_K: window size in images; 0 = disabled (fall back to DPEMA)
+_C.TEST.ADAPTATION.SWEMA_K = 0
+_C.TEST.ADAPTATION.SWEMA_ALPHA = 0.1
+
 # Exp 1 Variant A: reset adapter weights to source-init at each domain boundary
 _C.TEST.ADAPTATION.ADAPTER_RESET = False
 # Exp 1 Variant B: oracle prototype (forces ASRI_ALPHA=1.0 at runtime)

@@ -1,6 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import logging
 import numpy as np
+from collections import deque
 from typing import Dict, List, Optional, Tuple
 import torch
 from torch import nn
@@ -57,6 +58,8 @@ class GeneralizedRCNN(nn.Module):
         skip_tau: float = 1.0,
         asri_alpha: float = 0.0,
         oracle_prototype: bool = False,
+        swema_k: int = 0,
+        swema_alpha: float = 0.1,
     ):
         """
         Args:
@@ -119,6 +122,12 @@ class GeneralizedRCNN(nn.Module):
         # μ̃_te^{k,t} = (1-asri_alpha)*μ_te^{k,t} + asri_alpha*μ_tr^k
         self.asri_alpha = asri_alpha
         self.oracle_prototype = oracle_prototype  # Exp 1 Variant B: force alpha=1
+        # Sliding Window EMA: μ̃ = (1-swema_alpha)*μ_te_recent + swema_alpha*μ_tr
+        # swema_k=0 disables SWEMA and falls back to DPEMA
+        self.swema_k = swema_k
+        self.swema_alpha = swema_alpha
+        # per-class sliding window buffer: {k: deque of (sum, count) tensors}
+        self._swema_buf = {}
 
     @classmethod
     def from_config(cls, cfg):
@@ -146,6 +155,8 @@ class GeneralizedRCNN(nn.Module):
             "skip_tau": cfg.TEST.ADAPTATION.SKIP_TAU,
             "asri_alpha": cfg.TEST.ADAPTATION.ASRI_ALPHA,
             "oracle_prototype": cfg.TEST.ADAPTATION.ORACLE_PROTOTYPE,
+            "swema_k": cfg.TEST.ADAPTATION.SWEMA_K,
+            "swema_alpha": cfg.TEST.ADAPTATION.SWEMA_ALPHA,
         }
 
     def initialize(self):
@@ -166,6 +177,8 @@ class GeneralizedRCNN(nn.Module):
                 self.t_stats["fg"][k] = (mean, cov)
                 self.ema_n[k] = 0
         self.s_div = self.s_stats["kl_div"] if self.s_stats is not None and "kl_div" in self.s_stats else None
+        # reset sliding window buffers at domain boundary
+        self._swema_buf = {}
 
     @property
     def device(self):
@@ -336,9 +349,27 @@ class GeneralizedRCNN(nn.Module):
                     self.ema_n[k] += cur_feats.shape[0]
                     N = cur_feats.shape[0]
 
-                    # ── Prototype EMA (raw, stored to t_stats) ────────────────
-                    if self.ema_beta > 0.0:
-                        # DPEMA: exponential decay per detection instance
+                    # ── Prototype update ──────────────────────────────────────
+                    if self.swema_k > 0:
+                        # SWEMA: sliding window EMA over recent K images
+                        # buffer stores (feature_sum, count) per step; window = K steps
+                        if k not in self._swema_buf:
+                            self._swema_buf[k] = deque()
+                        self._swema_buf[k].append((cur_feats.sum(dim=0).detach(), N))
+                        # evict steps that exceed the window
+                        total_in_window = sum(cnt for _, cnt in self._swema_buf[k])
+                        while total_in_window > self.swema_k and len(self._swema_buf[k]) > 1:
+                            _, oldest_cnt = self._swema_buf[k].popleft()
+                            total_in_window -= oldest_cnt
+                        window_sum = sum(s for s, _ in self._swema_buf[k])
+                        window_cnt = sum(c for _, c in self._swema_buf[k])
+                        mu_recent = window_sum / window_cnt
+                        # μ̃ = (1 - swema_alpha) * μ_te_recent + swema_alpha * μ_tr
+                        src_mean = self.s_stats["fg"][k][0].to(self.device)
+                        raw_updated_mean = ((1.0 - self.swema_alpha) * mu_recent
+                                            + self.swema_alpha * src_mean)
+                    elif self.ema_beta > 0.0:
+                        # DPEMA: exponential decay over full history
                         effective_beta = self.ema_beta ** N
                         raw_updated_mean = (effective_beta * self.t_stats["fg"][k][0].to(self.device)
                                             + (1.0 - effective_beta) * cur_feats.mean(dim=0))
@@ -348,13 +379,14 @@ class GeneralizedRCNN(nn.Module):
                         delta = 1 / self.ema_gamma * diff.sum(dim=0)
                         raw_updated_mean = self.t_stats["fg"][k][0].to(self.device) + delta
 
-                    # store raw EMA only — ASRI not reflected in t_stats
+                    # store raw prototype — ASRI not reflected in t_stats
                     self.t_stats["fg"][k] = (raw_updated_mean.detach(), None)
 
                     # ── ASRI: applied at loss-time only, not stored ────────────
                     # μ̃_te^{k,t} = (1-α)*μ_te^{k,t} + α*μ_tr^k
                     # oracle_prototype (Exp 1 Var B) forces α=1 regardless of asri_alpha
-                    _alpha = 1.0 if self.oracle_prototype else self.asri_alpha
+                    # (SWEMA already incorporates source anchor; skip ASRI when SWEMA active)
+                    _alpha = 1.0 if self.oracle_prototype else (0.0 if self.swema_k > 0 else self.asri_alpha)
                     if _alpha > 0.0 and self.s_stats is not None:
                         src_mean = self.s_stats["fg"][k][0].to(self.device)
                         cur_target_mean = (1.0 - _alpha) * raw_updated_mean + _alpha * src_mean
@@ -386,7 +418,23 @@ class GeneralizedRCNN(nn.Module):
                     cur_feats = features[k].mean(dim=[2, 3])
                     N = cur_feats.shape[0]
 
-                    if self.dpema_apply_gl and self.ema_beta > 0.0:
+                    gl_swema_key = f"gl_{k}"
+                    if self.swema_k > 0 and self.dpema_apply_gl:
+                        # SWEMA for global branch
+                        if gl_swema_key not in self._swema_buf:
+                            self._swema_buf[gl_swema_key] = deque()
+                        self._swema_buf[gl_swema_key].append((cur_feats.sum(dim=0).detach(), N))
+                        total_in_window = sum(cnt for _, cnt in self._swema_buf[gl_swema_key])
+                        while total_in_window > self.swema_k and len(self._swema_buf[gl_swema_key]) > 1:
+                            _, oldest_cnt = self._swema_buf[gl_swema_key].popleft()
+                            total_in_window -= oldest_cnt
+                        window_sum = sum(s for s, _ in self._swema_buf[gl_swema_key])
+                        window_cnt = sum(c for _, c in self._swema_buf[gl_swema_key])
+                        mu_recent = window_sum / window_cnt
+                        src_mean_gl = self.s_stats["gl"][k][0].to(self.device)
+                        cur_target_mean = ((1.0 - self.swema_alpha) * mu_recent
+                                           + self.swema_alpha * src_mean_gl)
+                    elif self.dpema_apply_gl and self.ema_beta > 0.0:
                         # DPEMA for global branch
                         effective_beta = self.ema_beta ** N
                         cur_target_mean = (effective_beta * self.t_stats["gl"][k][0].to(self.device)
