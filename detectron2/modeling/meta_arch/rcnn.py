@@ -368,6 +368,12 @@ class GeneralizedRCNN(nn.Module):
                         src_mean = self.s_stats["fg"][k][0].to(self.device)
                         raw_updated_mean = ((1.0 - self.swema_alpha) * mu_recent
                                             + self.swema_alpha * src_mean)
+                        # Straight-through gradient: buffer stores detached values to avoid
+                        # retaining old computation graphs across iterations, so gradient
+                        # path through current features is re-attached here (value unchanged).
+                        raw_updated_mean = raw_updated_mean + (
+                            cur_feats.mean(dim=0) - cur_feats.mean(dim=0).detach()
+                        )
                     elif self.ema_beta > 0.0:
                         # DPEMA: exponential decay over full history
                         effective_beta = self.ema_beta ** N
@@ -434,6 +440,12 @@ class GeneralizedRCNN(nn.Module):
                         src_mean_gl = self.s_stats["gl"][k][0].to(self.device)
                         cur_target_mean = ((1.0 - self.swema_alpha) * mu_recent
                                            + self.swema_alpha * src_mean_gl)
+                        # Straight-through gradient: buffer stores detached values to avoid
+                        # retaining old computation graphs across iterations, so gradient
+                        # path through current features is re-attached here (value unchanged).
+                        cur_target_mean = cur_target_mean + (
+                            cur_feats.mean(dim=0) - cur_feats.mean(dim=0).detach()
+                        )
                     elif self.dpema_apply_gl and self.ema_beta > 0.0:
                         # DPEMA for global branch
                         effective_beta = self.ema_beta ** N
