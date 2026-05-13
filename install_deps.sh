@@ -44,6 +44,17 @@ echo "=== Step 3b: Install CLIP ==="
 pip install --no-build-isolation \
     git+https://github.com/openai/CLIP.git@d50d76daa670286dd6cacf3bcd80b5e4823fc8e1
 
+# ── Step 3c: HDF5 system library + h5py binary wheel ─────────────────────────
+# h5py 3.9.0 has no Python 3.12 wheel; building from source requires libhdf5-dev.
+# Pre-install a binary wheel here so requirements.txt sees h5py as satisfied.
+echo "=== Step 3c: Pre-install h5py ==="
+if command -v apt-get &>/dev/null; then
+    apt-get install -y --no-install-recommends libhdf5-dev 2>/dev/null \
+        && echo "  libhdf5-dev installed." \
+        || echo "  Warning: apt-get libhdf5-dev failed — trying binary wheel only."
+fi
+pip install --prefer-binary 'h5py>=3.9.0'
+
 # ── Step 4: requirements.txt ─────────────────────────────────────────────────
 # --no-build-isolation: lets pip reuse already-installed torch/numpy during
 # C-extension builds (pycocotools, etc.).

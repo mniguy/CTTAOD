@@ -56,4 +56,4 @@ portalocker>=2.5.1
 packaging
 yapf==0.32.0
 pydot==1.4.2
-h5py==3.9.0
+h5py>=3.9.0
