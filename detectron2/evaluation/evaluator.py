@@ -545,7 +545,7 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                     for t_p, s_p in zip(teacher_model.parameters(), model.parameters()):
                         if s_p.requires_grad:
                             t_p.data = beta * t_p.data + (1 - beta) * s_p.data
-                loss_str = " ".join(["{}: {:.6f}, ".format(k, losses[k].item()) for k in losses])
+                loss_str = " ".join(["{}: {:.6f}, ".format(k, float(losses[k])) for k in losses])
                 if wandb is not None:
                     wandb.log(losses, step=cur_step)
                     wandb.log({"total_loss": total_loss}, step=cur_step)
@@ -553,14 +553,14 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                     wandb.log({"accumulated_used": is_used}, step=cur_step)
                     wandb.log({"cur_used": is_used - prev_used}, step=cur_step)
                     if "global_align" in losses:
-                        wandb.log({"ema99_ratio": losses["global_align"].item() / (loss_ema99 + 1e-7)}, step=cur_step)
-                        wandb.log({"ema95_ratio": losses["global_align"].item() / (loss_ema95 + 1e-7)}, step=cur_step)
-                        wandb.log({"ema90_ratio": losses["global_align"].item() / (loss_ema90 + 1e-7)}, step=cur_step)
-                        wandb.log({"kl_div_ratio": losses["global_align"].item() / div_thr}, step=cur_step)
+                        wandb.log({"ema99_ratio": float(losses["global_align"]) / (loss_ema99 + 1e-7)}, step=cur_step)
+                        wandb.log({"ema95_ratio": float(losses["global_align"]) / (loss_ema95 + 1e-7)}, step=cur_step)
+                        wandb.log({"ema90_ratio": float(losses["global_align"]) / (loss_ema90 + 1e-7)}, step=cur_step)
+                        wandb.log({"kl_div_ratio": float(losses["global_align"]) / div_thr}, step=cur_step)
                 if "global_align" in losses:
-                    loss_ema99 = 0.99 * loss_ema99 + 0.01 * losses["global_align"].item()
-                    loss_ema95 = 0.95 * loss_ema95 + 0.05 * losses["global_align"].item()
-                    loss_ema90 = 0.9 * loss_ema90 + 0.1 * losses["global_align"].item()
+                    loss_ema99 = 0.99 * loss_ema99 + 0.01 * float(losses["global_align"])
+                    loss_ema95 = 0.95 * loss_ema95 + 0.05 * float(losses["global_align"])
+                    loss_ema90 = 0.9 * loss_ema90 + 0.1 * float(losses["global_align"])
                 del losses, total_loss
             else:
                 with torch.no_grad():
@@ -729,7 +729,7 @@ def lazy_inference_on_dataset_online_adaptation(model, data_loader, evaluator, o
                 #     for t_p, s_p in zip(teacher_model.parameters(), model.parameters()):
                 #         if s_p.requires_grad:
                 #             t_p.data = beta * t_p.data + (1 - beta) * s_p.data
-                loss_str = " ".join(["{}: {:.6f}, ".format(k, losses[k].item()) for k in losses])
+                loss_str = " ".join(["{}: {:.6f}, ".format(k, float(losses[k])) for k in losses])
                 # if wandb is not None:
                 #     wandb.log(losses, step=cur_step)
                 #     wandb.log({"total_loss": total_loss}, step=cur_step)

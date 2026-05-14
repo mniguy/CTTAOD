@@ -418,7 +418,7 @@ class GeneralizedRCNN(nn.Module):
                 adapt_loss["fg_align"] = self.alpha_fg * loss_fg_align
 
         if self.gl_align is not None:
-            loss_gl_align = 0
+            loss_gl_align = torch.tensor(0.0, dtype=torch.float32, device=self.device)
             if self.gl_align == "KL":
                 for k in features.keys():
                     cur_feats = features[k].mean(dim=[2, 3])
