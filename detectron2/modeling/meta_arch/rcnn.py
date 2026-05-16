@@ -1,5 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import logging
+import math
 import numpy as np
 from collections import deque
 from typing import Dict, List, Optional, Tuple
@@ -60,6 +61,10 @@ class GeneralizedRCNN(nn.Module):
         oracle_prototype: bool = False,
         swema_k: int = 0,
         swema_alpha: float = 0.1,
+        asri_confgate: bool = False,
+        asri_confgate_lambda: float = 1.0,
+        asri_confgate_min: float = 0.0,
+        asri_gl: bool = False,
     ):
         """
         Args:
@@ -128,6 +133,12 @@ class GeneralizedRCNN(nn.Module):
         self.swema_alpha = swema_alpha
         # per-class sliding window buffer: {k: deque of (sum, count) tensors}
         self._swema_buf = {}
+        # Exp 8: confidence-gated ASRI
+        self.asri_confgate = asri_confgate
+        self.asri_confgate_lambda = asri_confgate_lambda
+        self.asri_confgate_min = asri_confgate_min
+        # Exp 9: ASRI for global branch
+        self.asri_gl = asri_gl
 
     @classmethod
     def from_config(cls, cfg):
@@ -157,6 +168,10 @@ class GeneralizedRCNN(nn.Module):
             "oracle_prototype": cfg.TEST.ADAPTATION.ORACLE_PROTOTYPE,
             "swema_k": cfg.TEST.ADAPTATION.SWEMA_K,
             "swema_alpha": cfg.TEST.ADAPTATION.SWEMA_ALPHA,
+            "asri_confgate": cfg.TEST.ADAPTATION.ASRI_CONFGATE,
+            "asri_confgate_lambda": cfg.TEST.ADAPTATION.ASRI_CONFGATE_LAMBDA,
+            "asri_confgate_min": cfg.TEST.ADAPTATION.ASRI_CONFGATE_MIN,
+            "asri_gl": cfg.TEST.ADAPTATION.ASRI_GL,
         }
 
     def initialize(self):
@@ -390,9 +405,20 @@ class GeneralizedRCNN(nn.Module):
 
                     # ── ASRI: applied at loss-time only, not stored ────────────
                     # μ̃_te^{k,t} = (1-α)*μ_te^{k,t} + α*μ_tr^k
-                    # oracle_prototype (Exp 1 Var B) forces α=1 regardless of asri_alpha
-                    # (SWEMA already incorporates source anchor; skip ASRI when SWEMA active)
-                    _alpha = 1.0 if self.oracle_prototype else (0.0 if self.swema_k > 0 else self.asri_alpha)
+                    if self.oracle_prototype:
+                        _alpha = 1.0
+                    elif self.swema_k > 0:
+                        _alpha = 0.0  # SWEMA already anchors to source
+                    elif self.asri_confgate and self.asri_alpha > 0.0:
+                        # Exp 8: gate α by per-class detection count × avg confidence.
+                        # Sparse/blurry images → α stays near asri_alpha (lean on source).
+                        # Dense/confident images → α falls toward asri_confgate_min.
+                        k_avg_score = fg_scores[fg_preds == k].mean().item()
+                        _alpha = (self.asri_confgate_min
+                                  + (self.asri_alpha - self.asri_confgate_min)
+                                  * math.exp(-self.asri_confgate_lambda * N * k_avg_score))
+                    else:
+                        _alpha = self.asri_alpha
                     if _alpha > 0.0 and self.s_stats is not None:
                         src_mean = self.s_stats["fg"][k][0].to(self.device)
                         cur_target_mean = (1.0 - _alpha) * raw_updated_mean + _alpha * src_mean
@@ -457,12 +483,25 @@ class GeneralizedRCNN(nn.Module):
                         delta = 1 / self.ema_gamma * diff.sum(dim=0)
                         cur_target_mean = self.t_stats["gl"][k][0].to(self.device) + delta
 
+                    # ── ASRI_GL: source residual injection for global branch ──
+                    # Applied at loss-time only; raw cur_target_mean is stored.
+                    # Skipped when SWEMA is active (source anchor already embedded).
+                    raw_gl_mean = cur_target_mean
+                    if (self.asri_gl
+                            and not (self.swema_k > 0 and self.dpema_apply_gl)
+                            and self.asri_alpha > 0.0
+                            and self.s_stats is not None):
+                        src_mean_gl = self.s_stats["gl"][k][0].to(self.device)
+                        cur_target_mean = ((1.0 - self.asri_alpha) * raw_gl_mean
+                                           + self.asri_alpha * src_mean_gl)
+                    # ──────────────────────────────────────────────────────────
+
                     t_dist = torch.distributions.MultivariateNormal(cur_target_mean, self.s_stats["gl"][k][1].to(self.device) + self.template_cov["gl"][k].to(self.device))
                     s_dist = torch.distributions.MultivariateNormal(self.s_stats["gl"][k][0].to(self.device), self.s_stats["gl"][k][1].to(self.device) + self.template_cov["gl"][k].to(self.device))
                     cur_loss_gl_align = (torch.distributions.kl.kl_divergence(s_dist, t_dist) + torch.distributions.kl.kl_divergence(t_dist, s_dist)) / 2
                     if cur_loss_gl_align < 10 ** 5:
                         loss_gl_align += cur_loss_gl_align
-                        self.t_stats["gl"][k] = (cur_target_mean.detach(), None)
+                        self.t_stats["gl"][k] = (raw_gl_mean.detach(), None)
             elif self.gl_align == "bn_stats":
                 cur_bn_stats = [(l.mean, l.var) for l in list(self.backbone.bottom_up.modules()) if (isinstance(l, FrozenBatchNorm2d) or isinstance(l, LayerNorm)) and l.out_batch_norm]
                 for idx in range(len(cur_bn_stats)):

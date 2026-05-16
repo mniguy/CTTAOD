@@ -697,6 +697,21 @@ _C.TEST.ADAPTATION.ASRI_ALPHA = 0.0
 # If True, α is computed as asri_alpha / (1 + ||μ_te - μ_tr|| / sqrt(tr(Σ_tr)/d))
 _C.TEST.ADAPTATION.ASRI_ADAPTIVE = False
 
+# ── Confidence-gated ASRI (Exp 8) ────────────────────────────────────────────
+# Per-class α_t = clamp(ASRI_CONFGATE_MIN + (asri_alpha - ASRI_CONFGATE_MIN)
+#                       * exp(-ASRI_CONFGATE_LAMBDA * N_k * avg_score_k),
+#                       ASRI_CONFGATE_MIN, asri_alpha)
+# High N×score (reliable prototype) → α_t near ASRI_CONFGATE_MIN (trust target)
+# Low  N×score (sparse/blurry)      → α_t near asri_alpha         (lean on source)
+_C.TEST.ADAPTATION.ASRI_CONFGATE = False
+_C.TEST.ADAPTATION.ASRI_CONFGATE_LAMBDA = 1.0  # decay rate; sweep {0.5, 1.0, 2.0, 5.0}
+_C.TEST.ADAPTATION.ASRI_CONFGATE_MIN = 0.0     # floor for α_t
+
+# ── ASRI for global branch (Exp 9) ───────────────────────────────────────────
+# Apply source residual injection to global FPN prototypes as well as fg.
+# Uses the same asri_alpha. Skipped when SWEMA is active (source already embedded).
+_C.TEST.ADAPTATION.ASRI_GL = False
+
 # ── Sliding Window EMA (SWEMA) ────────────────────────────────────────────────
 # μ̃ = (1 - SWEMA_ALPHA) * μ_te_recent + SWEMA_ALPHA * μ_tr
 # μ_te_recent: EMA over only the most recent SWEMA_K steps (windowed)
