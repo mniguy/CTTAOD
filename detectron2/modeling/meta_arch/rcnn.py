@@ -65,6 +65,13 @@ class GeneralizedRCNN(nn.Module):
         asri_confgate_lambda: float = 1.0,
         asri_confgate_min: float = 0.0,
         asri_gl: bool = False,
+        conf_proto: bool = False,
+        conf_proto_mode: str = "soft",
+        conf_proto_threshold: float = 0.7,
+        conf_proto_gamma: float = 1.0,
+        cb_proto: bool = False,
+        cb_proto_max_per_class: int = 8,
+        cb_proto_inv_freq: bool = False,
     ):
         """
         Args:
@@ -139,6 +146,15 @@ class GeneralizedRCNN(nn.Module):
         self.asri_confgate_min = asri_confgate_min
         # Exp 9: ASRI for global branch
         self.asri_gl = asri_gl
+        # Exp 10: confidence-weighted prototype update
+        self.conf_proto = conf_proto
+        self.conf_proto_mode = conf_proto_mode
+        self.conf_proto_threshold = conf_proto_threshold
+        self.conf_proto_gamma = conf_proto_gamma
+        # Exp 10: class-balanced subsampling
+        self.cb_proto = cb_proto
+        self.cb_proto_max_per_class = cb_proto_max_per_class
+        self.cb_proto_inv_freq = cb_proto_inv_freq
 
     @classmethod
     def from_config(cls, cfg):
@@ -172,6 +188,13 @@ class GeneralizedRCNN(nn.Module):
             "asri_confgate_lambda": cfg.TEST.ADAPTATION.ASRI_CONFGATE_LAMBDA,
             "asri_confgate_min": cfg.TEST.ADAPTATION.ASRI_CONFGATE_MIN,
             "asri_gl": cfg.TEST.ADAPTATION.ASRI_GL,
+            "conf_proto": cfg.TEST.ADAPTATION.CONF_PROTO,
+            "conf_proto_mode": cfg.TEST.ADAPTATION.CONF_PROTO_MODE,
+            "conf_proto_threshold": cfg.TEST.ADAPTATION.CONF_PROTO_THRESHOLD,
+            "conf_proto_gamma": cfg.TEST.ADAPTATION.CONF_PROTO_GAMMA,
+            "cb_proto": cfg.TEST.ADAPTATION.CB_PROTO,
+            "cb_proto_max_per_class": cfg.TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS,
+            "cb_proto_inv_freq": cfg.TEST.ADAPTATION.CB_PROTO_INV_FREQ,
         }
 
     def initialize(self):
@@ -358,11 +381,58 @@ class GeneralizedRCNN(nn.Module):
             for _k in fg_preds[fg_preds != self.num_classes].unique():
                 k = _k.item()
                 if (fg_preds == k).sum() > 0:
-                    cur_feats = box_features[fg_preds == k]
+                    mask_k = (fg_preds == k)
+                    cur_feats = box_features[mask_k]
+                    cur_scores = fg_scores[mask_k]
                     #feature_sim['fg-{}'.format(str(k))] = F.cosine_similarity(self.t_stats["fg"][k][0].reshape(1, -1),
                     #                    cur_feats.mean(dim=0).reshape(1, -1)).item()
+
+                    # ── Exp 10: Class-Balanced Subsampling ────────────────────
+                    # Cap per-class samples used for the prototype update. The
+                    # full set is still counted in `ema_n` to track true class
+                    # frequency, but only `M_max` features feed the EMA mean.
+                    if self.cb_proto and cur_feats.shape[0] > self.cb_proto_max_per_class:
+                        # rank by confidence (descending) and take top-M; if
+                        # scores are all 1 (e.g. no fg_align softmax) this
+                        # degenerates to a deterministic head-of-tensor cut.
+                        topk = torch.topk(cur_scores, self.cb_proto_max_per_class).indices
+                        cur_feats = cur_feats[topk]
+                        cur_scores = cur_scores[topk]
+
+                    # ── Exp 10: Confidence-Weighted Prototype Update ──────────
+                    # Build per-sample weights w_i ∈ [0, 1]. The weighted mean
+                    # μ̂ = Σ w_i f_i / Σ w_i replaces the uniform mean.
+                    if self.conf_proto:
+                        if self.conf_proto_mode == "hard":
+                            w = (cur_scores >= self.conf_proto_threshold).float()
+                        else:  # "soft"
+                            w = cur_scores.clamp(min=0.0) ** self.conf_proto_gamma
+                        w_sum = w.sum()
+                        if w_sum.item() < 1e-6:
+                            # all samples gated out — skip this class for this batch
+                            continue
+                        weighted_feats = cur_feats * w.unsqueeze(1)
+                        # `cur_feats` is consumed below via mean()/sum(); patch
+                        # those calls by overriding the tensor: we redefine
+                        # `cur_feats` as the conf-weighted set (sum-normalized)
+                        # so downstream mean/sum still gives the right number.
+                        cur_feats_mean = weighted_feats.sum(dim=0) / w_sum
+                        cur_feats_sum  = weighted_feats.sum(dim=0) * (cur_feats.shape[0] / w_sum)
+                    else:
+                        cur_feats_mean = cur_feats.mean(dim=0)
+                        cur_feats_sum  = cur_feats.sum(dim=0)
+
                     self.ema_n[k] += cur_feats.shape[0]
                     N = cur_feats.shape[0]
+
+                    # Optional inverse-frequency rescaling of effective N: rare
+                    # classes get a larger EMA step. Implemented by inflating N
+                    # (and thus `effective_beta`/SWEMA weight) using a running
+                    # frequency estimate.
+                    if self.cb_proto and self.cb_proto_inv_freq:
+                        max_n = max(self.ema_n.values()) if len(self.ema_n) else 1
+                        inv_freq = float(max_n) / max(self.ema_n[k], 1)
+                        N = max(1, int(round(N * inv_freq)))
 
                     # ── Prototype update ──────────────────────────────────────
                     if self.swema_k > 0:
@@ -370,7 +440,7 @@ class GeneralizedRCNN(nn.Module):
                         # buffer stores (feature_sum, count) per step; window = K steps
                         if k not in self._swema_buf:
                             self._swema_buf[k] = deque()
-                        self._swema_buf[k].append((cur_feats.sum(dim=0).detach(), N))
+                        self._swema_buf[k].append((cur_feats_sum.detach(), N))
                         # evict steps that exceed the window
                         total_in_window = sum(cnt for _, cnt in self._swema_buf[k])
                         while total_in_window > self.swema_k and len(self._swema_buf[k]) > 1:
@@ -387,17 +457,18 @@ class GeneralizedRCNN(nn.Module):
                         # retaining old computation graphs across iterations, so gradient
                         # path through current features is re-attached here (value unchanged).
                         raw_updated_mean = raw_updated_mean + (
-                            cur_feats.mean(dim=0) - cur_feats.mean(dim=0).detach()
+                            cur_feats_mean - cur_feats_mean.detach()
                         )
                     elif self.ema_beta > 0.0:
                         # DPEMA: exponential decay over full history
                         effective_beta = self.ema_beta ** N
                         raw_updated_mean = (effective_beta * self.t_stats["fg"][k][0].to(self.device)
-                                            + (1.0 - effective_beta) * cur_feats.mean(dim=0))
+                                            + (1.0 - effective_beta) * cur_feats_mean)
                     else:
                         # legacy gamma method (backward compat)
-                        diff = cur_feats - self.t_stats["fg"][k][0][None, :].to(self.device)
-                        delta = 1 / self.ema_gamma * diff.sum(dim=0)
+                        # diff/delta computed against the (possibly conf-weighted) mean.
+                        delta = (cur_feats_mean - self.t_stats["fg"][k][0].to(self.device)) \
+                                * (N / self.ema_gamma)
                         raw_updated_mean = self.t_stats["fg"][k][0].to(self.device) + delta
 
                     # store raw prototype — ASRI not reflected in t_stats

@@ -737,6 +737,28 @@ _C.TEST.ADAPTATION.EWC_FISHER_PATH = None            # path to precomputed Fishe
 _C.TEST.ADAPTATION.PROTOTYPE_REPLAY = False
 _C.TEST.ADAPTATION.PROTOTYPE_REPLAY_BUFFER_SIZE = 3  # keep last N domain prototypes
 
+# ── Exp 10: Adapter drift + pseudo-label quality gate ────────────────────────
+# (EWC keys above already cover "EWC on adapter".)
+#
+# Confidence-Weighted Prototype Update
+#   When enabled, foreground features contribute to the per-class EMA with
+#   weights derived from their detection confidence (softmax score for the
+#   predicted class). Two modes:
+#     soft : per-feature weight = score (or score**gamma)
+#     hard : per-feature weight = 1 if score >= threshold else 0
+_C.TEST.ADAPTATION.CONF_PROTO = False
+_C.TEST.ADAPTATION.CONF_PROTO_MODE = "soft"          # "soft" | "hard"
+_C.TEST.ADAPTATION.CONF_PROTO_THRESHOLD = 0.7        # used in "hard" mode
+_C.TEST.ADAPTATION.CONF_PROTO_GAMMA = 1.0            # score**gamma (soft)
+
+# Class-Balanced Subsampling for Prototype
+#   When enabled, cap the number of features per class used for the prototype
+#   update at MAX_PER_CLASS (random subsample if more). INV_FREQ also rescales
+#   each class's contribution by 1/freq(c) running estimate.
+_C.TEST.ADAPTATION.CB_PROTO = False
+_C.TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS = 8        # cap per batch per class
+_C.TEST.ADAPTATION.CB_PROTO_INV_FREQ = False         # also apply inv-frequency weight
+
 # Eval-matrix mode (Exp 0/1/2/4): evaluate on all T domains after each domain
 _C.TEST.EVAL_MATRIX = False
 

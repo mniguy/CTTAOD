@@ -439,6 +439,15 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
     if cfg.TEST.ADAPTATION.EWC_LAMBDA > 0.0 and cfg.TEST.ADAPTATION.EWC_FISHER_PATH is not None:
         import torch as _torch
         ewc_fisher = _torch.load(cfg.TEST.ADAPTATION.EWC_FISHER_PATH)
+        # EWC anchor θ* must be the *source-init* adapter weights. In continual
+        # mode this function is called once per domain — re-using `init_weights`
+        # would re-anchor to whatever state we ended the previous domain at.
+        # Cache the true source weights on the model the first time we see EWC.
+        if not hasattr(model, "_ewc_source_weights"):
+            model._ewc_source_weights = [w.clone().detach() for w in init_weights]
+        ewc_anchor = model._ewc_source_weights
+    else:
+        ewc_anchor = None
 
     stoch_restore = cfg.TEST.ADAPTATION.STOCHASTIC_RESTORE
     stoch_prob    = cfg.TEST.ADAPTATION.STOCHASTIC_RESTORE_PROB
@@ -483,13 +492,14 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                         stick_loss += torch.mean((p - s) ** 2)
                     losses["stick"] = cfg.TEST.ADAPTATION.WEIGHT_REG * stick_loss
 
-                # Exp 4: EWC-style adapter regularization
+                # Exp 4 / Exp 10: EWC-style adapter regularization
+                # L_ewc = Σ_i F_i · (θ_i - θ_i^source)²
                 if ewc_lambda > 0.0 and ewc_fisher is not None:
                     ewc_loss = 0.0
                     param_list = [p for pg in optimizer.param_groups for p in pg['params']]
-                    for p_idx, (p, s) in enumerate(zip(param_list, init_weights)):
+                    for p_idx, (p, s) in enumerate(zip(param_list, ewc_anchor)):
                         fisher = ewc_fisher[p_idx].to(p.device) if p_idx < len(ewc_fisher) else 1.0
-                        ewc_loss = ewc_loss + (fisher * (p - s) ** 2).sum()
+                        ewc_loss = ewc_loss + (fisher * (p - s.to(p.device)) ** 2).sum()
                     losses["ewc"] = ewc_lambda * ewc_loss
 
                 # Exp 4: Prototype Replay — penalise deviation from buffered prototypes
