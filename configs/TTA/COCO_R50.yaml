@@ -11,6 +11,7 @@ TEST:
   ONLINE_ADAPTATION: True
   CONTINUAL_DOMAIN: True
   ADAPTATION:
+    SKIP_REDUNDANT: "stat-period-ema"
     CONTINUAL: True
     SOURCE_FEATS_PATH: "./models/stats/COCO_R50_stats.pt"
     GLOBAL_ALIGN: "KL"
