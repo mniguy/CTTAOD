@@ -8,8 +8,8 @@
 #         Confidence-Weighted Prototype Update
 #         Class-Balanced Subsampling for Prototype
 #
-# Reference base (same as Exp 4 baseline CTTAOD):
-#   DPEMA β=0.999, no ASRI residual, fg + global KL alignment.
+# Reference base (same as Exp 9): COCO R50, DPEMA β=0.999, ASRI_GL=True,
+#   fg + global KL alignment.
 #
 # Runs:
 #   R0  Baseline CTTAOD (control)               — no extra regularization
@@ -24,10 +24,12 @@
 #       R3c max_per_class=8 + inv_freq
 #   R4  Combined: best EWC λ* + best ConfProto + best CB
 #
+# Evaluated on COCO → COCO-C (15 corruptions, same as Exp 5–9).
+#
 # Outputs:
-#   results/exp10/metrics_<tag>.json    — {BWT, FWT, avg_mAP, per_domain_mAP}
+#   results/exp10/metrics_<tag>.json    — per-corruption AP + avg_mAP/BWT/FWT
 #   results/exp10/eval_matrix_<tag>.npy
-#   results/exp10/exp10_summary.json    — flat table over all runs
+#   results/exp10/exp10_summary.json
 #
 # Usage:
 #   bash scripts/exp10_drift_quality.sh [CHECKPOINT_PATH]
@@ -38,10 +40,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT/tools"
 
-CKPT="${1:-../models/checkpoints/faster_rcnn_R50_cityscapes.pth}"
-CFG="../configs/TTA/Cityscapes_R50.yaml"
-STATS_PATH="../models/stats/Cityscapes_R50_stats.pt"
-FISHER_PATH="../models/stats/Cityscapes_R50_fisher.pt"
+CKPT="${1:-../models/checkpoints/faster_rcnn_r50_coco.pth}"
+CFG="../configs/TTA/COCO_R50.yaml"
+STATS_PATH="../models/stats/COCO_R50_stats.pt"
+FISHER_PATH="../models/stats/COCO_R50_fisher.pt"
 
 export DETECTRON2_DATASETS="${DETECTRON2_DATASETS:-$ROOT/datasets}"
 mkdir -p ../results/exp10
@@ -60,17 +62,40 @@ BASE_ARGS=(
     TEST.ADAPTATION.FOREGROUND_ALIGN "KL"
     TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH"
     TEST.ADAPTATION.EMA_BETA 0.999
+    TEST.ADAPTATION.DPEMA_APPLY_GL True
     TEST.ADAPTATION.ASRI_ALPHA 0.0
     TEST.ADAPTATION.ADAPTER_RESET False
     TEST.ADAPTATION.ORACLE_PROTOTYPE False
+)
+
+CORRUPTIONS=(
+    gaussian_noise shot_noise impulse_noise defocus_blur glass_blur
+    motion_blur zoom_blur snow frost fog brightness contrast
+    elastic_transform pixelate jpeg_compression
 )
 
 # helper: copy metrics + eval matrix into results/exp10 ----------------------
 collect() {
     local TAG="$1"
     local OUT="$2"
-    cp "${OUT}/eval_matrix/metrics.json"      "../results/exp10/metrics_${TAG}.json"      2>/dev/null || true
-    cp "${OUT}/eval_matrix/eval_matrix.npy"   "../results/exp10/eval_matrix_${TAG}.npy"   2>/dev/null || true
+    cp "${OUT}/eval_matrix/metrics.json"    "../results/exp10/metrics_${TAG}.json"    2>/dev/null || true
+    cp "${OUT}/eval_matrix/eval_matrix.npy" "../results/exp10/eval_matrix_${TAG}.npy" 2>/dev/null || true
+}
+
+# helper: avg AP across 15 corruptions from a metrics.json ------------------
+avg_ap() {
+    python3 - "$1" <<'PYEOF'
+import json, sys, math
+CORRUPTIONS = [
+    "gaussian_noise","shot_noise","impulse_noise","defocus_blur","glass_blur",
+    "motion_blur","zoom_blur","snow","frost","fog","brightness","contrast",
+    "elastic_transform","pixelate","jpeg_compression"
+]
+d = json.load(open(sys.argv[1]))
+vals = [d.get(f"coco_2017_val-{c}", {}).get("AP", float("nan")) for c in CORRUPTIONS]
+vals = [v for v in vals if not math.isnan(v)]
+print(f"{sum(vals)/len(CORRUPTIONS):.4f}" if vals else "nan")
+PYEOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -89,7 +114,7 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== R0 : Baseline CTTAOD ==="
-OUT=../outputs/exp10/r0_baseline
+OUT=../outputs/COCO_TTA/exp10_r0_baseline
 python train_net.py "${BASE_ARGS[@]}" \
     OUTPUT_DIR "$OUT"
 collect "r0_baseline" "$OUT"
@@ -101,7 +126,7 @@ echo ""
 echo "=== R1 : EWC on adapter ==="
 for EWC_L in 0.1 1.0 10.0 100.0; do
     EWC_TAG=$(echo "$EWC_L" | sed 's/\./_/g')
-    OUT="../outputs/exp10/r1_ewc${EWC_TAG}"
+    OUT="../outputs/COCO_TTA/exp10_r1_ewc${EWC_TAG}"
     echo "  λ_ewc = $EWC_L"
     python train_net.py "${BASE_ARGS[@]}" \
         TEST.ADAPTATION.EWC_LAMBDA "$EWC_L" \
@@ -117,7 +142,7 @@ echo ""
 echo "=== R2 : Confidence-Weighted Prototype Update ==="
 
 # R2a soft, γ=1.0
-OUT="../outputs/exp10/r2a_conf_soft"
+OUT="../outputs/COCO_TTA/exp10_r2a_conf_soft"
 python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.CONF_PROTO True \
     TEST.ADAPTATION.CONF_PROTO_MODE "soft" \
@@ -126,7 +151,7 @@ python train_net.py "${BASE_ARGS[@]}" \
 collect "r2a_conf_soft" "$OUT"
 
 # R2b hard, threshold=0.7
-OUT="../outputs/exp10/r2b_conf_hard07"
+OUT="../outputs/COCO_TTA/exp10_r2b_conf_hard07"
 python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.CONF_PROTO True \
     TEST.ADAPTATION.CONF_PROTO_MODE "hard" \
@@ -135,7 +160,7 @@ python train_net.py "${BASE_ARGS[@]}" \
 collect "r2b_conf_hard07" "$OUT"
 
 # R2c hard, threshold=0.5
-OUT="../outputs/exp10/r2c_conf_hard05"
+OUT="../outputs/COCO_TTA/exp10_r2c_conf_hard05"
 python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.CONF_PROTO True \
     TEST.ADAPTATION.CONF_PROTO_MODE "hard" \
@@ -149,21 +174,21 @@ collect "r2c_conf_hard05" "$OUT"
 echo ""
 echo "=== R3 : Class-Balanced Subsampling ==="
 
-OUT="../outputs/exp10/r3a_cb4"
+OUT="../outputs/COCO_TTA/exp10_r3a_cb4"
 python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.CB_PROTO True \
     TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS 4 \
     OUTPUT_DIR "$OUT"
 collect "r3a_cb4" "$OUT"
 
-OUT="../outputs/exp10/r3b_cb8"
+OUT="../outputs/COCO_TTA/exp10_r3b_cb8"
 python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.CB_PROTO True \
     TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS 8 \
     OUTPUT_DIR "$OUT"
 collect "r3b_cb8" "$OUT"
 
-OUT="../outputs/exp10/r3c_cb8_invfreq"
+OUT="../outputs/COCO_TTA/exp10_r3c_cb8_invfreq"
 python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.CB_PROTO True \
     TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS 8 \
@@ -172,32 +197,40 @@ python train_net.py "${BASE_ARGS[@]}" \
 collect "r3c_cb8_invfreq" "$OUT"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pick the best variant per family by avg_mAP, then run a combined config
+# Pick the best variant per family by avg AP across 15 corruptions
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Picking best per-family variants for R4 ==="
-read BEST_EWC BEST_CONF BEST_CB < <(python - <<'PYEOF'
-import json, glob, os, re, sys
+read BEST_EWC BEST_CONF BEST_CB < <(python3 - <<'PYEOF'
+import json, glob, os, re, math
+
+CORRUPTIONS = [
+    "gaussian_noise","shot_noise","impulse_noise","defocus_blur","glass_blur",
+    "motion_blur","zoom_blur","snow","frost","fog","brightness","contrast",
+    "elastic_transform","pixelate","jpeg_compression"
+]
+
+def avg_ap(path):
+    try:
+        d = json.load(open(path))
+    except Exception:
+        return float("nan")
+    vals = [d.get(f"coco_2017_val-{c}", {}).get("AP", float("nan")) for c in CORRUPTIONS]
+    vals = [v for v in vals if not math.isnan(v)]
+    return sum(vals) / len(CORRUPTIONS) if vals else float("nan")
 
 def best(prefix):
-    bm, bf = -1e9, None
+    bf, bm = None, -1e9
     for f in glob.glob(f"../results/exp10/metrics_{prefix}*.json"):
-        try:
-            m = json.load(open(f))
-        except Exception:
-            continue
-        if m.get("avg_mAP", -1) > bm:
-            bm, bf = m["avg_mAP"], f
+        m = avg_ap(f)
+        if not math.isnan(m) and m > bm:
+            bm, bf = m, f
     return bf
-
-best_ewc  = best("r1_ewc")
-best_conf = best("r2")
-best_cb   = best("r3")
 
 def tag(path):
     return re.search(r"metrics_([^/]+?)\.json$", path).group(1) if path else "NONE"
 
-print(tag(best_ewc), tag(best_conf), tag(best_cb))
+print(tag(best("r1_ewc")), tag(best("r2")), tag(best("r3")))
 PYEOF
 )
 echo "  best EWC  = $BEST_EWC"
@@ -216,17 +249,17 @@ ewc_args_from_tag() {
 }
 conf_args_from_tag() {
     case "$1" in
-        r2a_conf_soft)    echo "TEST.ADAPTATION.CONF_PROTO True TEST.ADAPTATION.CONF_PROTO_MODE soft TEST.ADAPTATION.CONF_PROTO_GAMMA 1.0" ;;
-        r2b_conf_hard07)  echo "TEST.ADAPTATION.CONF_PROTO True TEST.ADAPTATION.CONF_PROTO_MODE hard TEST.ADAPTATION.CONF_PROTO_THRESHOLD 0.7" ;;
-        r2c_conf_hard05)  echo "TEST.ADAPTATION.CONF_PROTO True TEST.ADAPTATION.CONF_PROTO_MODE hard TEST.ADAPTATION.CONF_PROTO_THRESHOLD 0.5" ;;
+        r2a_conf_soft)   echo "TEST.ADAPTATION.CONF_PROTO True TEST.ADAPTATION.CONF_PROTO_MODE soft TEST.ADAPTATION.CONF_PROTO_GAMMA 1.0" ;;
+        r2b_conf_hard07) echo "TEST.ADAPTATION.CONF_PROTO True TEST.ADAPTATION.CONF_PROTO_MODE hard TEST.ADAPTATION.CONF_PROTO_THRESHOLD 0.7" ;;
+        r2c_conf_hard05) echo "TEST.ADAPTATION.CONF_PROTO True TEST.ADAPTATION.CONF_PROTO_MODE hard TEST.ADAPTATION.CONF_PROTO_THRESHOLD 0.5" ;;
         *) echo "" ;;
     esac
 }
 cb_args_from_tag() {
     case "$1" in
-        r3a_cb4)           echo "TEST.ADAPTATION.CB_PROTO True TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS 4" ;;
-        r3b_cb8)           echo "TEST.ADAPTATION.CB_PROTO True TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS 8" ;;
-        r3c_cb8_invfreq)   echo "TEST.ADAPTATION.CB_PROTO True TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS 8 TEST.ADAPTATION.CB_PROTO_INV_FREQ True" ;;
+        r3a_cb4)         echo "TEST.ADAPTATION.CB_PROTO True TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS 4" ;;
+        r3b_cb8)         echo "TEST.ADAPTATION.CB_PROTO True TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS 8" ;;
+        r3c_cb8_invfreq) echo "TEST.ADAPTATION.CB_PROTO True TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS 8 TEST.ADAPTATION.CB_PROTO_INV_FREQ True" ;;
         *) echo "" ;;
     esac
 }
@@ -240,7 +273,7 @@ CB_OV=$(cb_args_from_tag    "$BEST_CB")
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== R4 : Combined (EWC + Conf + CB) ==="
-OUT="../outputs/exp10/r4_combined"
+OUT="../outputs/COCO_TTA/exp10_r4_combined"
 python train_net.py "${BASE_ARGS[@]}" \
     $EWC_OV $CONF_OV $CB_OV \
     OUTPUT_DIR "$OUT"
@@ -251,26 +284,60 @@ collect "r4_combined" "$OUT"
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Exp 10 Summary ==="
-python - <<'PYEOF'
-import json, glob, os
+python3 - <<'PYEOF'
+import json, glob, os, math
+
+CORRUPTIONS = [
+    "gaussian_noise","shot_noise","impulse_noise","defocus_blur","glass_blur",
+    "motion_blur","zoom_blur","snow","frost","fog","brightness","contrast",
+    "elastic_transform","pixelate","jpeg_compression"
+]
+
+def get_ap(d, c):
+    return d.get(f"coco_2017_val-{c}", {}).get("AP", float("nan"))
+
+def avg_ap(d):
+    vals = [get_ap(d, c) for c in CORRUPTIONS]
+    vals = [v for v in vals if not math.isnan(v)]
+    return sum(vals) / len(CORRUPTIONS) if vals else float("nan")
+
 rows = []
 for f in sorted(glob.glob("../results/exp10/metrics_*.json")):
     tag = os.path.basename(f).replace("metrics_", "").replace(".json", "")
     try:
-        m = json.load(open(f))
+        d = json.load(open(f))
     except Exception:
         continue
-    rows.append((tag, m.get("BWT", float("nan")), m.get("FWT", float("nan")), m.get("avg_mAP", float("nan"))))
+    rows.append((tag, d, avg_ap(d)))
 
-print(f"{'Run':<24} {'BWT':>8} {'FWT':>8} {'avg_mAP':>9}")
-print("-" * 53)
-for tag, bwt, fwt, mp in rows:
-    print(f"{tag:<24} {bwt:>8.4f} {fwt:>8.4f} {mp:>9.2f}")
+print(f"\n{'Run':<24} {'avg AP':>8}  gauss   defoc   glass   fog     snow")
+print("-" * 72)
+for tag, d, ap in rows:
+    print(f"{tag:<24} {ap:>8.2f}"
+          f"  {get_ap(d,'gaussian_noise'):>5.2f}"
+          f"  {get_ap(d,'defocus_blur'):>5.2f}"
+          f"  {get_ap(d,'glass_blur'):>5.2f}"
+          f"  {get_ap(d,'fog'):>5.2f}"
+          f"  {get_ap(d,'snow'):>5.2f}")
+
+print("\n--- Per-corruption breakdown (best run) ---")
+if rows:
+    best_tag, best_d, best_ap = max(rows, key=lambda x: x[2] if not math.isnan(x[2]) else -1e9)
+    print(f"Best: {best_tag}  (avg AP = {best_ap:.2f})\n")
+    print(f"{'corruption':<24} {'AP':>8}")
+    print("-" * 34)
+    for c in CORRUPTIONS:
+        print(f"{c:<24} {get_ap(best_d, c):>8.2f}")
 
 with open("../results/exp10/exp10_summary.json", "w") as fp:
-    json.dump([{"tag": t, "BWT": b, "FWT": f, "avg_mAP": m} for t, b, f, m in rows], fp, indent=2)
+    json.dump(
+        [{"tag": t, "avg_AP": ap,
+          **{c: get_ap(d, c) for c in CORRUPTIONS}}
+         for t, d, ap in rows],
+        fp, indent=2
+    )
 print("\nSaved to ../results/exp10/exp10_summary.json")
 PYEOF
 
 echo ""
-echo "=== Exp 10 complete. ==="
+echo "=== Exp 10 complete. Results in results/exp10/ ==="
