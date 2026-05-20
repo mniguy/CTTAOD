@@ -733,6 +733,20 @@ _C.TEST.ADAPTATION.STOCHASTIC_RESTORE_PROB = 0.01   # probability per parameter
 _C.TEST.ADAPTATION.EWC_LAMBDA = 0.0
 _C.TEST.ADAPTATION.EWC_FISHER_PATH = None            # path to precomputed Fisher
 
+# Exp 11: EWC extensions — all opt-in (defaults preserve Exp 10 behavior)
+# (A) Layer-normalized Fisher: divide each parameter's Fisher by its layer mean.
+_C.TEST.ADAPTATION.EWC_FISHER_NORM = False
+# (B) Drift-adaptive λ: scale λ inversely with global_align / loss_ema99.
+#     effective_λ = λ / max(ratio / BETA, 1.0)  →  larger drift, smaller λ.
+_C.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE = False
+_C.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE_BETA = 1.0
+# (C) Sliding anchor: EMA-update the anchor each step instead of fixing at source.
+_C.TEST.ADAPTATION.EWC_SLIDING_ANCHOR = False
+_C.TEST.ADAPTATION.EWC_SLIDING_ANCHOR_BETA = 0.999
+# (D) Importance type: switch from "fisher" (gradient²) to "mas" (output-sensitivity).
+#     MAS importance is loaded from EWC_FISHER_PATH as well (file should be MAS file).
+_C.TEST.ADAPTATION.EWC_IMPORTANCE_TYPE = "fisher"    # "fisher" | "mas"
+
 # Exp 4: Prototype Replay Buffer
 _C.TEST.ADAPTATION.PROTOTYPE_REPLAY = False
 _C.TEST.ADAPTATION.PROTOTYPE_REPLAY_BUFFER_SIZE = 3  # keep last N domain prototypes

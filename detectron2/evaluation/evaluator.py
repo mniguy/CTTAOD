@@ -440,13 +440,27 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
     if cfg.TEST.ADAPTATION.EWC_LAMBDA > 0.0 and cfg.TEST.ADAPTATION.EWC_FISHER_PATH is not None:
         import torch as _torch
         ewc_fisher = _torch.load(cfg.TEST.ADAPTATION.EWC_FISHER_PATH)
+
+        # Exp 11 (A): Layer-normalized Fisher — divide each tensor by its own mean
+        # so per-layer magnitude differences don't make λ ambiguous.
+        if cfg.TEST.ADAPTATION.EWC_FISHER_NORM:
+            ewc_fisher = [f / (f.mean() + 1e-12) for f in ewc_fisher]
+
         # EWC anchor θ* must be the *source-init* adapter weights. In continual
         # mode this function is called once per domain — re-using `init_params_all`
         # would re-anchor to whatever state we ended the previous domain at.
         # Cache the true source weights on the model the first time we see EWC.
         if not hasattr(model, "_ewc_source_weights"):
             model._ewc_source_weights = [p.clone().detach() for pg in optimizer.param_groups for p in pg['params']]
-        ewc_anchor = model._ewc_source_weights
+
+        # Exp 11 (C): Sliding anchor — separate EMA-updated copy of the anchor.
+        # Initialized from source weights, updated each step after optimizer.step().
+        if cfg.TEST.ADAPTATION.EWC_SLIDING_ANCHOR:
+            if not hasattr(model, "_ewc_sliding_anchor"):
+                model._ewc_sliding_anchor = [p.clone().detach() for p in model._ewc_source_weights]
+            ewc_anchor = model._ewc_sliding_anchor
+        else:
+            ewc_anchor = model._ewc_source_weights
     else:
         ewc_anchor = None
 
@@ -494,7 +508,7 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                     losses["stick"] = cfg.TEST.ADAPTATION.WEIGHT_REG * stick_loss
 
                 # Exp 4 / Exp 10: EWC-style adapter regularization
-                # L_ewc = Σ_i F_i · (θ_i - θ_i^source)²
+                # L_ewc = Σ_i F_i · (θ_i - θ_i^anchor)²
                 if ewc_lambda > 0.0 and ewc_fisher is not None:
                     ewc_loss = 0.0
                     param_list = [p for pg in optimizer.param_groups for p in pg['params']]
@@ -508,7 +522,20 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                                 f"(currently WHERE='{cfg.TEST.ADAPTATION.WHERE}')."
                             )
                         ewc_loss = ewc_loss + (fisher * (p - s.to(p.device)) ** 2).sum()
-                    losses["ewc"] = ewc_lambda * ewc_loss
+
+                    # Exp 11 (B): Drift-adaptive λ.
+                    # When global_align is large relative to its EMA (i.e. domain
+                    # just shifted), shrink λ so adaptation isn't choked. When the
+                    # ratio is ≤ BETA (stable), keep λ as-is.
+                    if cfg.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE and "global_align" in losses:
+                        ga = float(losses["global_align"])
+                        ratio = ga / (loss_ema99 + 1e-7)
+                        beta_a = cfg.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE_BETA
+                        scale = 1.0 / max(ratio / beta_a, 1.0)
+                        effective_lambda = ewc_lambda * scale
+                    else:
+                        effective_lambda = ewc_lambda
+                    losses["ewc"] = effective_lambda * ewc_loss
 
                 # Exp 4: Prototype Replay — penalise deviation from buffered prototypes
                 if proto_replay and hasattr(model, 'prototype_buffer') and model.prototype_buffer:
@@ -543,6 +570,19 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                         torch.nn.utils.clip_grad_norm_(model.backbone.parameters(),
                                                        cfg.SOLVER.CLIP_GRADIENTS.CLIP_VALUE)
                     optimizer.step()
+
+                    # Exp 11 (C): Sliding-anchor EMA update.
+                    # anchor ← β · anchor + (1-β) · θ_current
+                    if (cfg.TEST.ADAPTATION.EWC_SLIDING_ANCHOR
+                            and ewc_lambda > 0.0
+                            and hasattr(model, "_ewc_sliding_anchor")):
+                        sa_beta = cfg.TEST.ADAPTATION.EWC_SLIDING_ANCHOR_BETA
+                        _pl = [p for pg in optimizer.param_groups for p in pg['params']]
+                        for _i, _p in enumerate(_pl):
+                            model._ewc_sliding_anchor[_i].mul_(sa_beta).add_(
+                                _p.detach().to(model._ewc_sliding_anchor[_i].device),
+                                alpha=(1.0 - sa_beta),
+                            )
 
                     # Exp 4: Stochastic Restoration (CoTTA-style)
                     # With probability p, reset each adapter parameter to its source value
