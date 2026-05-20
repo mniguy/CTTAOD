@@ -106,34 +106,17 @@ if [ ! -f "$FISHER_PATH" ]; then
     python compute_fisher.py \
         --config-file "$CFG" \
         MODEL.WEIGHTS "$CKPT" \
-        TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH"
+        TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
+        TEST.ADAPTATION.WHERE "adapter"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# R0 : Baseline CTTAOD (control)
+# R0 : Baseline CTTAOD (control) — already completed, skip
 # ─────────────────────────────────────────────────────────────────────────────
-echo ""
-echo "=== R0 : Baseline CTTAOD ==="
-OUT=../outputs/COCO_TTA/exp10_r0_baseline
-python train_net.py "${BASE_ARGS[@]}" \
-    OUTPUT_DIR "$OUT"
-collect "r0_baseline" "$OUT"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# R1 : EWC on adapter — λ sweep
+# R1 : EWC on adapter — λ sweep — already completed, skip
 # ─────────────────────────────────────────────────────────────────────────────
-echo ""
-echo "=== R1 : EWC on adapter ==="
-for EWC_L in 0.1 1.0 10.0 100.0; do
-    EWC_TAG=$(echo "$EWC_L" | sed 's/\./_/g')
-    OUT="../outputs/COCO_TTA/exp10_r1_ewc${EWC_TAG}"
-    echo "  λ_ewc = $EWC_L"
-    python train_net.py "${BASE_ARGS[@]}" \
-        TEST.ADAPTATION.EWC_LAMBDA "$EWC_L" \
-        TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
-        OUTPUT_DIR "$OUT"
-    collect "r1_ewc${EWC_TAG}" "$OUT"
-done
 
 # ─────────────────────────────────────────────────────────────────────────────
 # R2 : Confidence-Weighted Prototype Update

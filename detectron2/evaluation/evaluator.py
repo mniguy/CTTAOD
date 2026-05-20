@@ -428,11 +428,12 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
     f_sim = {}
     _s_div_sum = sum(model.s_div.values()) if (model.s_div is not None and len(model.s_div) > 0) else 1.0
     div_thr = 2 * _s_div_sum * cfg.TEST.ADAPTATION.SKIP_TAU if cfg.TEST.ADAPTATION.SKIP_REDUNDANT is not None else 2 * _s_div_sum
-    # for weight regularization and stochastic restoration
+    # for weight regularization (stick_loss): one entry per param_group (first param each)
     init_weights = []
-    for p_idx, _p in enumerate(optimizer.param_groups):
-        p = _p['params'][0]
-        init_weights.append(p.clone().detach())
+    for _p in optimizer.param_groups:
+        init_weights.append(_p['params'][0].clone().detach())
+    # for EWC anchor and stochastic restoration: one entry per trainable param
+    init_params_all = [p.clone().detach() for pg in optimizer.param_groups for p in pg['params']]
 
     # Exp 4: EWC — load Fisher information matrix if provided
     ewc_fisher = None
@@ -440,11 +441,11 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
         import torch as _torch
         ewc_fisher = _torch.load(cfg.TEST.ADAPTATION.EWC_FISHER_PATH)
         # EWC anchor θ* must be the *source-init* adapter weights. In continual
-        # mode this function is called once per domain — re-using `init_weights`
+        # mode this function is called once per domain — re-using `init_params_all`
         # would re-anchor to whatever state we ended the previous domain at.
         # Cache the true source weights on the model the first time we see EWC.
         if not hasattr(model, "_ewc_source_weights"):
-            model._ewc_source_weights = [w.clone().detach() for w in init_weights]
+            model._ewc_source_weights = [p.clone().detach() for pg in optimizer.param_groups for p in pg['params']]
         ewc_anchor = model._ewc_source_weights
     else:
         ewc_anchor = None
@@ -499,6 +500,13 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                     param_list = [p for pg in optimizer.param_groups for p in pg['params']]
                     for p_idx, (p, s) in enumerate(zip(param_list, ewc_anchor)):
                         fisher = ewc_fisher[p_idx].to(p.device) if p_idx < len(ewc_fisher) else 1.0
+                        if isinstance(fisher, torch.Tensor) and fisher.shape != p.shape:
+                            raise RuntimeError(
+                                f"EWC Fisher shape mismatch at param {p_idx}: "
+                                f"fisher={tuple(fisher.shape)} vs param={tuple(p.shape)}. "
+                                f"Recompute Fisher with the same WHERE setting as the eval run "
+                                f"(currently WHERE='{cfg.TEST.ADAPTATION.WHERE}')."
+                            )
                         ewc_loss = ewc_loss + (fisher * (p - s.to(p.device)) ** 2).sum()
                     losses["ewc"] = ewc_lambda * ewc_loss
 
@@ -541,7 +549,7 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                     if stoch_restore:
                         import torch as _torch
                         param_list = [p for pg in optimizer.param_groups for p in pg['params']]
-                        for p, s in zip(param_list, init_weights):
+                        for p, s in zip(param_list, init_params_all):
                             mask = _torch.bernoulli(
                                 _torch.full(p.shape, stoch_prob, device=p.device)
                             ).bool()

@@ -373,8 +373,12 @@ class GeneralizedRCNN(nn.Module):
 
             valid = fg_scores >= 0.5
             # self.class_th_adapt = torch.where(self.class_th_adapt < self.max_conf, self.class_th_adapt,
-            #                                   torch.Tensor([self.max_conf]))
-            fg_preds[~valid] = torch.ones((~valid).sum()).long().to(valid.device) * self.num_classes
+            #                                   torch.Tensor([self.max_conf)])
+            # Clone before in-place modification: max() saves fg_preds/fg_scores in the
+            # autograd graph; modifying them in-place bumps their version and crashes backward.
+            fg_preds = fg_preds.clone()
+            fg_scores = fg_scores.clone()
+            fg_preds[~valid] = self.num_classes
             fg_scores[~valid] = bg_scores[~valid]
             loss_fg_align = 0
             loss_n = 0
@@ -391,6 +395,7 @@ class GeneralizedRCNN(nn.Module):
                     # Cap per-class samples used for the prototype update. The
                     # full set is still counted in `ema_n` to track true class
                     # frequency, but only `M_max` features feed the EMA mean.
+                    n_full = cur_feats.shape[0]
                     if self.cb_proto and cur_feats.shape[0] > self.cb_proto_max_per_class:
                         # rank by confidence (descending) and take top-M; if
                         # scores are all 1 (e.g. no fg_align softmax) this
@@ -412,17 +417,13 @@ class GeneralizedRCNN(nn.Module):
                             # all samples gated out — skip this class for this batch
                             continue
                         weighted_feats = cur_feats * w.unsqueeze(1)
-                        # `cur_feats` is consumed below via mean()/sum(); patch
-                        # those calls by overriding the tensor: we redefine
-                        # `cur_feats` as the conf-weighted set (sum-normalized)
-                        # so downstream mean/sum still gives the right number.
                         cur_feats_mean = weighted_feats.sum(dim=0) / w_sum
                         cur_feats_sum  = weighted_feats.sum(dim=0) * (cur_feats.shape[0] / w_sum)
                     else:
                         cur_feats_mean = cur_feats.mean(dim=0)
                         cur_feats_sum  = cur_feats.sum(dim=0)
 
-                    self.ema_n[k] += cur_feats.shape[0]
+                    self.ema_n[k] += n_full
                     N = cur_feats.shape[0]
 
                     # Optional inverse-frequency rescaling of effective N: rare
