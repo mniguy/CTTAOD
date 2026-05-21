@@ -12,10 +12,8 @@
 #
 # Design:
 #   E0  legacy gamma, no EWC          — copied from exp12
-#   E1  DPEMA,        EWC λ=10        — copied from exp11 (best EWC result)
+#   E1  DPEMA,        EWC λ=10        — copied from exp10 current method
 #   E2  legacy gamma, EWC λ=10        — NEW (key experiment)
-#   E3  legacy gamma, EWC λ=1         — flanker: gamma may need lower λ
-#   E4  legacy gamma, EWC λ=100       — flanker: upper bound check
 #
 # Base config: COCO R50, fg+global KL, adapter adaptation.
 #   legacy gamma path = EMA_BETA=0, SWEMA_K=0 (same as exp12 e0).
@@ -69,10 +67,22 @@ collect() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Pre-step : compute Fisher (only if missing) — required for EWC runs
+# ─────────────────────────────────────────────────────────────────────────────
+if [ ! -f "$FISHER_PATH" ]; then
+    echo "=== Pre-step: computing Fisher information for adapter ==="
+    python compute_fisher.py \
+        --config-file "$CFG" \
+        MODEL.WEIGHTS "$CKPT" \
+        TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
+        TEST.ADAPTATION.WHERE "adapter"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # E0 / E1 : carry over baselines (self-contained summary)
 # ─────────────────────────────────────────────────────────────────────────────
 cp -f ../results/exp12/metrics_e0_baseline.json   ../results/exp13/metrics_e0_gamma_noewc.json  2>/dev/null || true
-cp -f ../results/exp11/metrics_e0b_ewc10_fixed.json ../results/exp13/metrics_e1_dpema_ewc10.json  2>/dev/null || true
+cp -f ../results/exp10/metrics_r1_ewc10_0.json    ../results/exp13/metrics_e1_dpema_ewc10.json  2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # E2 : legacy gamma + EWC λ=10  ← key experiment
@@ -85,30 +95,6 @@ python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
     OUTPUT_DIR "$OUT"
 collect "e2_gamma_ewc10" "$OUT"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# E3 : legacy gamma + EWC λ=1   (lower flanker)
-# ─────────────────────────────────────────────────────────────────────────────
-echo ""
-echo "=== E3 : legacy gamma + EWC λ=1 ==="
-OUT="../outputs/COCO_TTA/exp13_e3_gamma_ewc1"
-python train_net.py "${BASE_ARGS[@]}" \
-    TEST.ADAPTATION.EWC_LAMBDA 1.0 \
-    TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
-    OUTPUT_DIR "$OUT"
-collect "e3_gamma_ewc1" "$OUT"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# E4 : legacy gamma + EWC λ=100  (upper flanker)
-# ─────────────────────────────────────────────────────────────────────────────
-echo ""
-echo "=== E4 : legacy gamma + EWC λ=100 ==="
-OUT="../outputs/COCO_TTA/exp13_e4_gamma_ewc100"
-python train_net.py "${BASE_ARGS[@]}" \
-    TEST.ADAPTATION.EWC_LAMBDA 100.0 \
-    TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
-    OUTPUT_DIR "$OUT"
-collect "e4_gamma_ewc100" "$OUT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Summary
@@ -141,8 +127,11 @@ def mean_ap16(d):
     return (sum(vals) + clean) / (len(CORRUPTIONS) + 1) if vals else float("nan")
 
 rows = []
+keep_tags = {"e0_gamma_noewc", "e1_dpema_ewc10", "e2_gamma_ewc10"}
 for f in sorted(glob.glob("../results/exp13/metrics_*.json")):
     tag = os.path.basename(f).replace("metrics_", "").replace(".json", "")
+    if tag not in keep_tags:
+        continue
     try:
         d = json.load(open(f))
     except Exception:
@@ -155,8 +144,6 @@ labels = {
     "e0_gamma_noewc":  ("gamma",  "  —"),
     "e1_dpema_ewc10":  ("DPEMA",  " 10"),
     "e2_gamma_ewc10":  ("gamma",  " 10"),
-    "e3_gamma_ewc1":   ("gamma",  "  1"),
-    "e4_gamma_ewc100": ("gamma",  "100"),
 }
 for tag, d, ap15, ap16 in rows:
     proto, ewc = labels.get(tag, ("?", "?"))
