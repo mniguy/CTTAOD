@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Exp 13: Legacy Gamma + EWC on Adapter
+# Exp 13: Legacy Gamma + EWC on Adapter  (+EWC × Sol A/B/C combos)
 #
 # Motivation:
 #   exp12 e0 (legacy gamma, no EWC)  avg15=21.23  beats
@@ -9,11 +9,15 @@
 #   → exp10/11 EWC experiments were all built on DPEMA (EMA_BETA=0.999),
 #     which is itself a suboptimal base. This exp asks: does EWC still help
 #     when the prototype base is legacy gamma (the stronger base)?
+#     And does EWC stack with Sol A/B/C prototype methods?
 #
 # Design:
-#   E0  legacy gamma, no EWC          — copied from exp12
-#   E1  DPEMA,        EWC λ=10        — copied from exp10 current method
-#   E2  legacy gamma, EWC λ=10        — NEW (key experiment)
+#   E0  legacy gamma, no EWC                  — copied from exp12
+#   E1  DPEMA,        EWC λ=10                — copied from exp11 (best EWC result)
+#   E2  legacy gamma, EWC λ=10               — key experiment
+#   E3  gamma + EWC λ=10 + Sol-A thr sweep  — {0.20, 0.30, 0.40}
+#   E4  gamma + EWC λ=10 + Sol-B α sweep    — {0.1, 0.3, 0.5}
+#   E5  gamma + EWC λ=10 + Sol-C            — adaptive gamma
 #
 # Base config: COCO R50, fg+global KL, adapter adaptation.
 #   legacy gamma path = EMA_BETA=0, SWEMA_K=0 (same as exp12 e0).
@@ -67,22 +71,10 @@ collect() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pre-step : compute Fisher (only if missing) — required for EWC runs
-# ─────────────────────────────────────────────────────────────────────────────
-if [ ! -f "$FISHER_PATH" ]; then
-    echo "=== Pre-step: computing Fisher information for adapter ==="
-    python compute_fisher.py \
-        --config-file "$CFG" \
-        MODEL.WEIGHTS "$CKPT" \
-        TEST.ADAPTATION.SOURCE_FEATS_PATH "$STATS_PATH" \
-        TEST.ADAPTATION.WHERE "adapter"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
 # E0 / E1 : carry over baselines (self-contained summary)
 # ─────────────────────────────────────────────────────────────────────────────
-cp -f ../results/exp12/metrics_e0_baseline.json   ../results/exp13/metrics_e0_gamma_noewc.json  2>/dev/null || true
-cp -f ../results/exp10/metrics_r1_ewc10_0.json    ../results/exp13/metrics_e1_dpema_ewc10.json  2>/dev/null || true
+cp -f ../results/exp12/metrics_e0_baseline.json        ../results/exp13/metrics_e0_gamma_noewc.json   2>/dev/null || true
+cp -f ../results/exp11/metrics_e0b_ewc10_fixed.json    ../results/exp13/metrics_e1_dpema_ewc10.json   2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # E2 : legacy gamma + EWC λ=10  ← key experiment
@@ -95,6 +87,55 @@ python train_net.py "${BASE_ARGS[@]}" \
     TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
     OUTPUT_DIR "$OUT"
 collect "e2_gamma_ewc10" "$OUT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# E3 : gamma + EWC λ=10 + Sol-A  (thr sweep)
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== E3 : gamma + EWC λ=10 + Sol-A (thr sweep) ==="
+for THR in 0.20 0.30 0.40; do
+    THR_TAG=$(echo "$THR" | sed 's/\./_/g')
+    OUT="../outputs/COCO_TTA/exp13_e3_ewc10_solA_thr${THR_TAG}"
+    echo "  SWITCH_COSIM_THR = $THR"
+    python train_net.py "${BASE_ARGS[@]}" \
+        TEST.ADAPTATION.EWC_LAMBDA 10.0 \
+        TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
+        TEST.ADAPTATION.PROTO_METHOD "reset" \
+        TEST.ADAPTATION.SWITCH_COSIM_THR "$THR" \
+        OUTPUT_DIR "$OUT"
+    collect "e3_ewc10_solA_thr${THR_TAG}" "$OUT"
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+# E4 : gamma + EWC λ=10 + Sol-B  (α sweep)
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== E4 : gamma + EWC λ=10 + Sol-B (α sweep) ==="
+for A in 0.1 0.3 0.5; do
+    A_TAG=$(echo "$A" | sed 's/\./_/g')
+    OUT="../outputs/COCO_TTA/exp13_e4_ewc10_solB_a${A_TAG}"
+    echo "  SOURCE_ANCHOR_ALPHA = $A"
+    python train_net.py "${BASE_ARGS[@]}" \
+        TEST.ADAPTATION.EWC_LAMBDA 10.0 \
+        TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
+        TEST.ADAPTATION.PROTO_METHOD "dual_memory" \
+        TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA "$A" \
+        OUTPUT_DIR "$OUT"
+    collect "e4_ewc10_solB_a${A_TAG}" "$OUT"
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+# E5 : gamma + EWC λ=10 + Sol-C
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== E5 : gamma + EWC λ=10 + Sol-C ==="
+OUT="../outputs/COCO_TTA/exp13_e5_ewc10_solC"
+python train_net.py "${BASE_ARGS[@]}" \
+    TEST.ADAPTATION.EWC_LAMBDA 10.0 \
+    TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
+    TEST.ADAPTATION.PROTO_METHOD "adaptive_gamma" \
+    OUTPUT_DIR "$OUT"
+collect "e5_ewc10_solC" "$OUT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Summary
@@ -127,28 +168,32 @@ def mean_ap16(d):
     return (sum(vals) + clean) / (len(CORRUPTIONS) + 1) if vals else float("nan")
 
 rows = []
-keep_tags = {"e0_gamma_noewc", "e1_dpema_ewc10", "e2_gamma_ewc10"}
 for f in sorted(glob.glob("../results/exp13/metrics_*.json")):
     tag = os.path.basename(f).replace("metrics_", "").replace(".json", "")
-    if tag not in keep_tags:
-        continue
     try:
         d = json.load(open(f))
     except Exception:
         continue
     rows.append((tag, d, avg_ap15(d), mean_ap16(d)))
 
-print(f"\n{'Run':<24} {'proto':>8} {'EWC λ':>6} {'avg15':>7} {'mean16':>7}  clean")
-print("-" * 64)
+print(f"\n{'Run':<28} {'proto':>6} {'EWC λ':>6} {'Sol':>12} {'avg15':>7} {'mean16':>7}  clean")
+print("-" * 78)
 labels = {
-    "e0_gamma_noewc":  ("gamma",  "  —"),
-    "e1_dpema_ewc10":  ("DPEMA",  " 10"),
-    "e2_gamma_ewc10":  ("gamma",  " 10"),
+    "e0_gamma_noewc":          ("gamma",  "  —", "—"),
+    "e1_dpema_ewc10":          ("DPEMA",  " 10", "—"),
+    "e2_gamma_ewc10":          ("gamma",  " 10", "—"),
+    "e3_ewc10_solA_thr0_20":   ("gamma",  " 10", "Sol-A 0.20"),
+    "e3_ewc10_solA_thr0_30":   ("gamma",  " 10", "Sol-A 0.30"),
+    "e3_ewc10_solA_thr0_40":   ("gamma",  " 10", "Sol-A 0.40"),
+    "e4_ewc10_solB_a0_1":      ("gamma",  " 10", "Sol-B 0.1"),
+    "e4_ewc10_solB_a0_3":      ("gamma",  " 10", "Sol-B 0.3"),
+    "e4_ewc10_solB_a0_5":      ("gamma",  " 10", "Sol-B 0.5"),
+    "e5_ewc10_solC":           ("gamma",  " 10", "Sol-C"),
 }
 for tag, d, ap15, ap16 in rows:
-    proto, ewc = labels.get(tag, ("?", "?"))
+    proto, ewc, sol = labels.get(tag, ("?", "?", "?"))
     clean = d.get("coco_2017_val", {}).get("AP", float("nan"))
-    print(f"{tag:<24} {proto:>8} {ewc:>6} {ap15:>7.2f} {ap16:>7.2f}  {clean:>6.2f}")
+    print(f"{tag:<28} {proto:>6} {ewc:>6} {sol:>12} {ap15:>7.2f} {ap16:>7.2f}  {clean:>6.2f}")
 
 print("\n--- Per-corruption breakdown ---")
 print(f"\n{'corruption':<20}", end="")
