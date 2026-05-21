@@ -72,6 +72,10 @@ class GeneralizedRCNN(nn.Module):
         cb_proto: bool = False,
         cb_proto_max_per_class: int = 8,
         cb_proto_inv_freq: bool = False,
+        # Exp 12: Sol A/B/C from ContinualTTA_ObjectDetection
+        proto_method: str = "baseline",
+        switch_cosim_thr: float = 0.30,
+        source_anchor_alpha: float = 0.30,
     ):
         """
         Args:
@@ -155,6 +159,14 @@ class GeneralizedRCNN(nn.Module):
         self.cb_proto = cb_proto
         self.cb_proto_max_per_class = cb_proto_max_per_class
         self.cb_proto_inv_freq = cb_proto_inv_freq
+        # Exp 12: Sol A/B/C
+        assert proto_method in ("baseline", "reset", "dual_memory", "adaptive_gamma"), \
+            f"Unknown proto_method: {proto_method}"
+        self.proto_method = proto_method
+        self.switch_cosim_thr = switch_cosim_thr
+        self.source_anchor_alpha = source_anchor_alpha
+        self.prev_cosine_sim = {}   # {k: previous step's cosine_sim_before}
+        self.s_proto_anchor = {}    # {k: frozen source prototype}
 
     @classmethod
     def from_config(cls, cfg):
@@ -195,6 +207,9 @@ class GeneralizedRCNN(nn.Module):
             "cb_proto": cfg.TEST.ADAPTATION.CB_PROTO,
             "cb_proto_max_per_class": cfg.TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS,
             "cb_proto_inv_freq": cfg.TEST.ADAPTATION.CB_PROTO_INV_FREQ,
+            "proto_method":        getattr(cfg.TEST.ADAPTATION, "PROTO_METHOD",         "baseline"),
+            "switch_cosim_thr":    getattr(cfg.TEST.ADAPTATION, "SWITCH_COSIM_THR",     0.30),
+            "source_anchor_alpha": getattr(cfg.TEST.ADAPTATION, "SOURCE_ANCHOR_ALPHA",  0.30),
         }
 
     def initialize(self):
@@ -214,9 +229,14 @@ class GeneralizedRCNN(nn.Module):
                 self.template_cov["fg"][k] = torch.eye(mean.shape[0]) * cov.max().item() / 30
                 self.t_stats["fg"][k] = (mean, cov)
                 self.ema_n[k] = 0
+                # Exp 12 Sol A/B: freeze source prototype as anchor for reset/blend
+                if self.proto_method in ("reset", "dual_memory"):
+                    self.s_proto_anchor[k] = mean.clone()
         self.s_div = self.s_stats["kl_div"] if self.s_stats is not None and "kl_div" in self.s_stats else None
         # reset sliding window buffers at domain boundary
         self._swema_buf = {}
+        # Exp 12 Sol A: reset previous-step cosine sim cache at domain boundary
+        self.prev_cosine_sim = {}
 
     @property
     def device(self):
@@ -436,7 +456,41 @@ class GeneralizedRCNN(nn.Module):
                         N = max(1, int(round(N * inv_freq)))
 
                     # ── Prototype update ──────────────────────────────────────
-                    if self.swema_k > 0:
+                    if self.proto_method != "baseline":
+                        # ── Exp 12: Sol A/B/C (ported from ContinualTTA_ObjectDetection) ──
+                        proto_vec = self.t_stats["fg"][k][0].to(self.device)
+                        batch_mean = cur_feats.mean(dim=0)
+                        cosine_sim_before = F.cosine_similarity(
+                            proto_vec.reshape(1, -1),
+                            batch_mean.reshape(1, -1),
+                        ).item()
+
+                        if self.proto_method == "reset":
+                            # Sol-A: cosine-sim *drop* between consecutive steps triggers reset to source.
+                            prev_cs = self.prev_cosine_sim.get(k, cosine_sim_before)
+                            drop = prev_cs - cosine_sim_before
+                            self.prev_cosine_sim[k] = cosine_sim_before
+                            if drop > self.switch_cosim_thr and k in self.s_proto_anchor:
+                                raw_updated_mean = self.s_proto_anchor[k].to(self.device).clone()
+                            else:
+                                diff = cur_feats - proto_vec[None, :]
+                                delta = (1.0 / self.ema_gamma) * diff.sum(dim=0)
+                                raw_updated_mean = proto_vec + delta
+
+                        elif self.proto_method == "dual_memory":
+                            # Sol-B: EMA prototype unchanged; blend applied at loss-time below.
+                            diff = cur_feats - proto_vec[None, :]
+                            delta = (1.0 / self.ema_gamma) * diff.sum(dim=0)
+                            raw_updated_mean = proto_vec + delta
+
+                        else:  # adaptive_gamma
+                            # Sol-C: mean-based EMA with cosine-scaled gamma, weight clamped to [0,1].
+                            cs_clipped = max(cosine_sim_before, 0.0)
+                            adaptive_g = max(self.ema_gamma * cs_clipped, 4.0)
+                            weight = min(N / adaptive_g, 1.0)
+                            raw_updated_mean = (1.0 - weight) * proto_vec \
+                                               + weight * cur_feats.mean(dim=0)
+                    elif self.swema_k > 0:
                         # SWEMA: sliding window EMA over recent K images
                         # buffer stores (feature_sum, count) per step; window = K steps
                         if k not in self._swema_buf:
@@ -497,6 +551,13 @@ class GeneralizedRCNN(nn.Module):
                     else:
                         cur_target_mean = raw_updated_mean
                     # ──────────────────────────────────────────────────────────
+
+                    # Exp 12 Sol-B: source residual injection at KL-loss time only.
+                    # EMA prototype stays raw (stored above); KL t_dist mean is blended.
+                    if self.proto_method == "dual_memory" and k in self.s_proto_anchor:
+                        a = self.source_anchor_alpha
+                        cur_target_mean = (1.0 - a) * cur_target_mean \
+                                          + a * self.s_proto_anchor[k].to(self.device)
 
                     t_dist = torch.distributions.MultivariateNormal(cur_target_mean, self.s_stats["fg"][k][1].to(self.device) + self.template_cov["fg"][k].to(self.device))
                     s_dist = torch.distributions.MultivariateNormal(self.s_stats["fg"][k][0].to(self.device), self.s_stats["fg"][k][1].to(self.device) + self.template_cov["fg"][k].to(self.device))

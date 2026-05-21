@@ -773,6 +773,15 @@ _C.TEST.ADAPTATION.CB_PROTO = False
 _C.TEST.ADAPTATION.CB_PROTO_MAX_PER_CLASS = 8        # cap per batch per class
 _C.TEST.ADAPTATION.CB_PROTO_INV_FREQ = False         # also apply inv-frequency weight
 
+# Exp 12: Solution A/B/C ported from ContinualTTA_ObjectDetection.
+#   baseline       : no change to existing CTTAOD update path
+#   reset          : Sol-A. Domain-shift detection via cosine-sim drop -> reset prototype to source anchor
+#   dual_memory    : Sol-B. EMA prototype unchanged; KL loss uses blended (1-a)*mu_te + a*mu_tr
+#   adaptive_gamma : Sol-C. gamma scaled by cosine similarity (mean-based EMA, clamped)
+_C.TEST.ADAPTATION.PROTO_METHOD = "baseline"
+_C.TEST.ADAPTATION.SWITCH_COSIM_THR = 0.30           # Sol-A: cosine-sim drop threshold
+_C.TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA = 0.3         # Sol-B: source residual blend weight
+
 # Eval-matrix mode (Exp 0/1/2/4): evaluate on all T domains after each domain
 _C.TEST.EVAL_MATRIX = False
 
