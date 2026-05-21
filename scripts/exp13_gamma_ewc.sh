@@ -17,7 +17,6 @@
 #   E2  legacy gamma, EWC λ=10               — key experiment
 #   E3  gamma + EWC λ=10 + Sol-A thr sweep  — {0.20, 0.30, 0.40}
 #   E4  gamma + EWC λ=10 + Sol-B α sweep    — {0.1, 0.3, 0.5}
-#   E5  gamma + EWC λ=10 + Sol-C            — adaptive gamma
 #
 # Base config: COCO R50, fg+global KL, adapter adaptation.
 #   legacy gamma path = EMA_BETA=0, SWEMA_K=0 (same as exp12 e0).
@@ -93,7 +92,7 @@ collect "e2_gamma_ewc10" "$OUT"
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== E3 : gamma + EWC λ=10 + Sol-A (thr sweep) ==="
-for THR in 0.20 0.30 0.40; do
+for THR in 0.40; do
     THR_TAG=$(echo "$THR" | sed 's/\./_/g')
     OUT="../outputs/COCO_TTA/exp13_e3_ewc10_solA_thr${THR_TAG}"
     echo "  SWITCH_COSIM_THR = $THR"
@@ -111,7 +110,7 @@ done
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== E4 : gamma + EWC λ=10 + Sol-B (α sweep) ==="
-for A in 0.1 0.3 0.5; do
+for A in 0.5; do
     A_TAG=$(echo "$A" | sed 's/\./_/g')
     OUT="../outputs/COCO_TTA/exp13_e4_ewc10_solB_a${A_TAG}"
     echo "  SOURCE_ANCHOR_ALPHA = $A"
@@ -123,19 +122,6 @@ for A in 0.1 0.3 0.5; do
         OUTPUT_DIR "$OUT"
     collect "e4_ewc10_solB_a${A_TAG}" "$OUT"
 done
-
-# ─────────────────────────────────────────────────────────────────────────────
-# E5 : gamma + EWC λ=10 + Sol-C
-# ─────────────────────────────────────────────────────────────────────────────
-echo ""
-echo "=== E5 : gamma + EWC λ=10 + Sol-C ==="
-OUT="../outputs/COCO_TTA/exp13_e5_ewc10_solC"
-python train_net.py "${BASE_ARGS[@]}" \
-    TEST.ADAPTATION.EWC_LAMBDA 10.0 \
-    TEST.ADAPTATION.EWC_FISHER_PATH "$FISHER_PATH" \
-    TEST.ADAPTATION.PROTO_METHOD "adaptive_gamma" \
-    OUTPUT_DIR "$OUT"
-collect "e5_ewc10_solC" "$OUT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Summary
@@ -188,7 +174,6 @@ labels = {
     "e4_ewc10_solB_a0_1":      ("gamma",  " 10", "Sol-B 0.1"),
     "e4_ewc10_solB_a0_3":      ("gamma",  " 10", "Sol-B 0.3"),
     "e4_ewc10_solB_a0_5":      ("gamma",  " 10", "Sol-B 0.5"),
-    "e5_ewc10_solC":           ("gamma",  " 10", "Sol-C"),
 }
 for tag, d, ap15, ap16 in rows:
     proto, ewc, sol = labels.get(tag, ("?", "?", "?"))
