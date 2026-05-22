@@ -1,0 +1,218 @@
+Chosen Introduction Style
+=========================
+
+I recommend Style B: Failure-evidence first.
+
+Reason: this project is not primarily proposing a new object detection task or a fully new representation-learning formulation. It is taking a strong existing continual test-time adaptation setting for object detection and exposing a concrete failure mode: adaptation helps under each incoming corruption, but the same online updates can accumulate errors as corruptions arrive sequentially without domain labels. This makes the paper stronger if the Introduction starts from the observed failure of current TTAOD pipelines, then decomposes that failure into two coupled drifts: prototype drift in feature statistics and adapter weight drift in the adapted parameters. This style naturally supports a method with two matched components: source-anchored prototype correction and importance-weighted adapter regularization.
+
+
+Paragraph-by-Paragraph Outline
+==============================
+
+Paragraph 1: Motivation and Problem Importance
+----------------------------------------------
+
+Role:
+Introduce object detection under continual distribution shift as a practical and important problem.
+
+Claim the reader should accept:
+Modern detectors are deployed in environments where visual conditions change continuously, and static source-trained detectors are brittle under such shifts.
+
+Core content:
+- Object detectors are central to safety- and perception-critical applications.
+- Real test streams contain corruptions such as blur, noise, weather, contrast, and compression artifacts.
+- In many deployments, target data arrive online without labels, domain boundaries, or opportunities for source retraining.
+- This motivates continual test-time adaptation for object detection.
+
+Transition:
+If source-trained detectors fail under shift, the natural solution is to adapt at test time using unlabeled target inputs.
+
+
+Paragraph 2: Current TTAOD Paradigm
+------------------------------------
+
+Role:
+Summarize the dominant or current approach used in this project: feature-statistics alignment with lightweight parameter updates.
+
+Claim the reader should accept:
+A practical TTAOD strategy is to keep most detector parameters fixed and update only a small set of adapter parameters using source-target feature distribution alignment.
+
+Core content:
+- Existing TTAOD methods often rely on self-supervised or statistics-based losses because target labels are unavailable.
+- Source feature statistics are pre-collected from the clean training domain.
+- During test-time adaptation, global FPN features and foreground RoI features are aligned to these source statistics via KL divergence.
+- Lightweight adapters are attractive because they constrain the adaptation capacity and reduce the risk of corrupting the detector.
+
+Transition:
+Although this paradigm is stable and efficient, continual streams introduce a harder failure mode than single-domain adaptation.
+
+
+Paragraph 3: Failure Evidence
+-----------------------------
+
+Role:
+Present the key empirical symptom: online adaptation does not simply improve monotonically; it can forget or drift across sequential corruptions.
+
+Claim the reader should accept:
+The main challenge is not only adapting to the current corruption, but maintaining useful knowledge across a sequence of unlabeled corruptions.
+
+Core content:
+- COCO val2017-C contains 15 corruption types arriving sequentially: noise, blur, weather, digital, and photometric corruptions.
+- Domain labels and reset signals are unavailable during adaptation.
+- Preliminary analysis shows that naively accumulating target feature statistics can be unstable across the corruption sequence, while resetting unreliable foreground prototypes toward their source anchors can improve the average AP over 15 corruptions from 21.23 to 21.39.
+- These results suggest that the failure is not merely a lack of adaptation capacity; the adaptation memory itself can become unreliable.
+
+Transition:
+To explain why some reasonable methods fail, we need to identify what exactly drifts during continual TTAOD.
+
+
+Paragraph 4: Conceptual Lens: Two Coupled Drifts
+------------------------------------------------
+
+Role:
+Define the conceptual gap: existing adaptation objectives conflate two different sources of forgetting.
+
+Claim the reader should accept:
+Catastrophic forgetting in TTAOD arises from two coupled but distinct mechanisms: prototype drift and adapter weight drift.
+
+Core content:
+- Prototype drift: target foreground prototypes are estimated from noisy pseudo-detections; as errors accumulate, the adaptation target itself moves away from reliable source structure.
+- Adapter weight drift: adapter parameters are optimized on each incoming corruption; without constraints, updates that help the current domain can overwrite parameters useful for previous or future corruptions.
+- These mechanisms interact: bad prototypes induce bad gradients, and drifted adapters produce worse pseudo-foreground features.
+- The key opposition is statistical memory vs parametric memory: preserving source-aligned feature anchors while allowing enough parameter movement to adapt.
+
+Transition:
+This lens implies that a single generic stabilizer is insufficient; each drift needs a targeted control mechanism.
+
+
+Paragraph 5: Core Insight
+-------------------------
+
+Role:
+State the central idea of the method.
+
+Claim the reader should accept:
+Continual TTAOD should separately protect the adaptation target and the adapted parameters.
+
+Core content:
+- Do not treat forgetting as only a parameter regularization problem.
+- The target prototype used by the KL objective is itself a memory object and must be protected.
+- Conversely, prototype correction alone cannot prevent harmful adapter movement.
+- The insight: combine event-triggered prototype anchoring with importance-weighted adapter anchoring.
+
+Transition:
+This insight leads directly to a two-part method.
+
+
+Paragraph 6: Method Overview
+----------------------------
+
+Role:
+Introduce the proposed method at the design-principle level.
+
+Claim the reader should accept:
+The method implements the two controls in a simple, modular way that fits existing TTAOD pipelines.
+
+Core content:
+- Method name placeholder: Dual-Drift Regularized Test-Time Adaptation (DDR-TTA) or another name to be decided.
+- Component 1, prototype reset: monitor class-wise cosine similarity between the running foreground prototype and the current target batch prototype; when similarity drops sharply, reset the running prototype to the frozen source prototype.
+- Component 2, EWC adapter regularization: compute source-domain Fisher importance for adapter parameters and penalize movement from source adapter weights during online adaptation.
+- These components correspond one-to-one to prototype drift and adapter weight drift.
+
+Transition:
+The method should be validated by showing both overall performance and evidence that each component controls its intended failure mode.
+
+
+Paragraph 7: Experimental Validation
+------------------------------------
+
+Role:
+Describe the experimental protocol and what the experiments are meant to prove.
+
+Claim the reader should accept:
+The evaluation directly tests robustness under continual, unlabeled, multi-corruption shifts.
+
+Core content:
+- Benchmark: COCO val2017 with 15 corruption types arriving sequentially.
+- Detector: Faster R-CNN with lightweight residual adapters.
+- Adapted parameters: adapter parameters only.
+- Loss: foreground KL + global KL against source feature statistics, with optional prototype reset and adapter regularization.
+- Baselines: source-only evaluation, existing continual TTAOD methods, prototype-memory variants, adapter-regularization variants, and their combinations.
+- Desired evidence: higher average AP across corruptions, reduced degradation across later corruptions, and ablations showing prototype reset and adapter regularization are complementary.
+- Current known evidence should be stated conservatively: prototype reset improves the average AP over 15 corruptions from 21.23 to 21.39; importance-weighted adapter regularization is being tested as the complementary parameter-side control.
+
+Transition:
+These experiments support the paper's contributions.
+
+
+Paragraph 8: Contributions
+--------------------------
+
+Role:
+Close the Introduction with a compact contribution list that follows from the narrative.
+
+Claim the reader should accept:
+The paper contributes both a diagnostic view of forgetting and a corresponding method.
+
+Core content:
+- Contribution 1: identify and formulate continual TTAOD forgetting as dual drift in prototypes and adapter weights.
+- Contribution 2: propose a modular method combining source-anchored prototype reset with Fisher-weighted adapter regularization.
+- Contribution 3, if needed: provide empirical analysis on sequential COCO-C corruptions showing when prototype-side and weight-side stabilization help or fail.
+
+Transition:
+End of Introduction.
+
+
+Draft Introduction
+==================
+
+Object detectors are increasingly expected to operate in open visual environments where the test distribution changes continuously. 
+A detector trained on clean source images may encounter sensor noise, motion blur, defocus, adverse weather, contrast shifts, or compression artifacts within the same deployment stream. 
+In such settings, target annotations are unavailable, domain boundaries may not be given, and repeatedly retraining the detector is impractical. 
+These constraints make continual test-time adaptation for object detection an important problem: the model must improve itself from unlabeled test inputs while preserving its ability to detect objects under future and previously seen conditions.
+
+A practical line of work addresses this problem by adapting the detector at test time using self-supervised or statistics-based objectives. 
+Rather than updating the entire detector, recent TTAOD pipelines often restrict adaptation to lightweight modules, such as residual adapters, while keeping the source-trained backbone and detection heads fixed. 
+The adaptation objective can then align target-domain features with pre-collected source statistics. 
+In our setting, Faster R-CNN is equipped with lightweight adapters, and only the adapter parameters are updated online. 
+The adaptation signal is obtained by matching global backbone features and foreground RoI features to source feature distributions using KL divergence. 
+This design is efficient and less destructive than full-model adaptation, making it a strong starting point for continual TTAOD.
+
+However, continual adaptation introduces a failure mode that is not visible in isolated single-domain adaptation. 
+When corruptions arrive sequentially without domain labels, the model cannot simply reset at each shift or choose a domain-specific adaptation state. 
+Updates that help the current corruption may degrade the model's behavior on later corruptions, and noisy target estimates may accumulate over time. 
+On COCO val2017 with 15 sequential corruption types, our preliminary analysis shows that the memory used to estimate foreground target statistics is a critical source of instability. 
+In particular, a simple source-anchored reset for unreliable foreground prototypes improves the average AP (mAP) over 15 corruptions from 21.23 to 21.39. 
+This suggests that the issue is not merely insufficient adaptation capacity; the target statistics that drive adaptation can themselves drift and become unreliable.
+
+We view catastrophic forgetting in continual TTAOD through the lens of two coupled drifts. 
+The first is prototype drift. 
+Foreground alignment relies on target prototypes estimated from predicted boxes and classes; under corruption, these pseudo-foreground features can be sparse, biased, or incorrectly assigned. 
+Once the running prototype moves away from reliable source structure, the KL objective begins to optimize toward a corrupted target estimate. 
+The second is adapter weight drift. Even when only a small adapter subset is trainable, repeated gradient updates across changing corruptions can move adapter weights toward solutions that overfit the current visual condition and interfere with previous adaptation states. 
+These two drifts reinforce each other: degraded prototypes produce less reliable gradients, and drifted adapters produce less reliable foreground predictions.
+
+This perspective suggests that forgetting in TTAOD should not be treated as a single stability problem. 
+The adaptation target and the adapted parameters play different roles and require different forms of memory. 
+Prototype memory should remain sensitive to genuine domain changes but protected from abrupt unreliable shifts. 
+Parameter memory should allow local adaptation while discouraging movement along source-important directions. 
+In other words, continual TTAOD requires both statistical anchoring of foreground prototypes and parametric anchoring of adapter weights.
+
+Based on this insight, we propose a dual-drift regularization strategy for continual TTAOD. 
+On the prototype side, we use a source-anchored reset mechanism. 
+For each foreground class, we monitor the cosine similarity between the running target prototype and the current batch prototype; when the similarity drops sharply, we treat the update as unreliable and reset the running prototype to the frozen source prototype. 
+This mechanism directly targets prototype drift without requiring domain labels or explicit corruption boundaries. 
+On the parameter side, we apply Elastic Weight Consolidation to adapter weights. 
+A diagonal Fisher importance matrix is computed on source data, and online adaptation penalizes changes from the source adapter weights in proportion to their estimated importance. 
+This constrains harmful adapter drift while preserving the ability to adapt through low-importance directions.
+
+We evaluate this design in a continual COCO-C protocol built from COCO val2017 and 15 corruption types, including noise, blur, weather, photometric, and digital corruptions. 
+The detector is Faster R-CNN with residual adapters, and adaptation uses foreground and global KL alignment against source feature statistics. 
+We compare against source-only evaluation, existing continual TTAOD methods, prototype-memory variants, adapter-regularization variants, and combinations of prototype and adapter stabilization. 
+The central empirical question is whether prototype-side anchoring and weight-side anchoring provide complementary benefits: source-anchored prototype reset should reduce failures caused by unreliable foreground statistics, while Fisher-weighted adapter regularization should reduce destructive adapter movement across the corruption stream.
+
+Our contributions are threefold. 
+First, we formulate forgetting in continual test-time object detection as a dual-drift problem involving both foreground prototype estimates and adapter parameters. 
+Second, we instantiate this view with a simple modular method that combines source-anchored prototype reset with Fisher-weighted adapter regularization. 
+Third, we provide a controlled study on sequential COCO corruptions to analyze when prototype memory, adapter memory, and their combination improve continual test-time adaptation. 
+This framing turns catastrophic forgetting from a generic performance drop into a diagnosable interaction between statistical and parametric memory, and provides a concrete path toward more reliable TTAOD under unlabeled domain streams.
