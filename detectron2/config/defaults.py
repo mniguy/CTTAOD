@@ -782,6 +782,12 @@ _C.TEST.ADAPTATION.PROTO_METHOD = "baseline"
 _C.TEST.ADAPTATION.SWITCH_COSIM_THR = 0.30           # Sol-A: cosine-sim drop threshold
 _C.TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA = 0.3         # Sol-B: source residual blend weight
 
+# Exp 14: Two-drift diagnosis logging.
+# Writes per-adaptation-step prototype drift, adapter drift, pseudo-label quality,
+# and loss statistics to OUTPUT_DIR/drift/drift_log.jsonl.
+_C.TEST.ADAPTATION.DRIFT_LOG = False
+_C.TEST.ADAPTATION.DRIFT_LOG_PERIOD = 1
+
 # Eval-matrix mode (Exp 0/1/2/4): evaluate on all T domains after each domain
 _C.TEST.EVAL_MATRIX = False
 

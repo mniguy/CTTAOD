@@ -167,6 +167,7 @@ class GeneralizedRCNN(nn.Module):
         self.source_anchor_alpha = source_anchor_alpha
         self.prev_cosine_sim = {}   # {k: previous step's cosine_sim_before}
         self.s_proto_anchor = {}    # {k: frozen source prototype}
+        self._last_drift_stats = {} # Exp 14: populated by adapt() for JSONL logging
 
     @classmethod
     def from_config(cls, cfg):
@@ -237,6 +238,7 @@ class GeneralizedRCNN(nn.Module):
         self._swema_buf = {}
         # Exp 12 Sol A: reset previous-step cosine sim cache at domain boundary
         self.prev_cosine_sim = {}
+        self._last_drift_stats = {}
 
     @property
     def device(self):
@@ -372,6 +374,13 @@ class GeneralizedRCNN(nn.Module):
 
         adapt_loss = {}
         feature_sim = {}
+        drift_proto_cos_source = []
+        drift_proto_cos_batch = []
+        drift_proto_drop = []
+        drift_proto_classes = []
+        drift_fg_counts = []
+        drift_fg_scores = []
+        drift_reset_classes = []
         self.roi_heads.training = False
         self.proposal_generator.training = False
         # if "instances" in batched_inputs[0]:
@@ -408,6 +417,9 @@ class GeneralizedRCNN(nn.Module):
                     mask_k = (fg_preds == k)
                     cur_feats = box_features[mask_k]
                     cur_scores = fg_scores[mask_k]
+                    drift_proto_classes.append(k)
+                    drift_fg_counts.append(int(mask_k.sum().item()))
+                    drift_fg_scores.append(float(cur_scores.mean().detach().cpu()))
                     #feature_sim['fg-{}'.format(str(k))] = F.cosine_similarity(self.t_stats["fg"][k][0].reshape(1, -1),
                     #                    cur_feats.mean(dim=0).reshape(1, -1)).item()
 
@@ -455,6 +467,11 @@ class GeneralizedRCNN(nn.Module):
                         inv_freq = float(max_n) / max(self.ema_n[k], 1)
                         N = max(1, int(round(N * inv_freq)))
 
+                    proto_vec_before = self.t_stats["fg"][k][0].to(self.device)
+                    src_proto_for_log = self.s_stats["fg"][k][0].to(self.device) if self.s_stats is not None else None
+                    batch_mean_for_log = cur_feats.mean(dim=0)
+                    prev_cos_for_log = self.prev_cosine_sim.get(k, None)
+
                     # ── Prototype update ──────────────────────────────────────
                     if self.proto_method != "baseline":
                         # ── Exp 12: Sol A/B/C (ported from ContinualTTA_ObjectDetection) ──
@@ -472,6 +489,7 @@ class GeneralizedRCNN(nn.Module):
                             self.prev_cosine_sim[k] = cosine_sim_before
                             if drop > self.switch_cosim_thr and k in self.s_proto_anchor:
                                 raw_updated_mean = self.s_proto_anchor[k].to(self.device).clone()
+                                drift_reset_classes.append(k)
                             else:
                                 diff = cur_feats - proto_vec[None, :]
                                 delta = (1.0 / self.ema_gamma) * diff.sum(dim=0)
@@ -525,6 +543,18 @@ class GeneralizedRCNN(nn.Module):
                         delta = (cur_feats_mean - self.t_stats["fg"][k][0].to(self.device)) \
                                 * (N / self.ema_gamma)
                         raw_updated_mean = self.t_stats["fg"][k][0].to(self.device) + delta
+
+                    if src_proto_for_log is not None:
+                        drift_proto_cos_source.append(float(F.cosine_similarity(
+                            raw_updated_mean.detach().reshape(1, -1),
+                            src_proto_for_log.detach().reshape(1, -1),
+                        ).detach().cpu()))
+                    drift_proto_cos_batch.append(float(F.cosine_similarity(
+                        proto_vec_before.detach().reshape(1, -1),
+                        batch_mean_for_log.detach().reshape(1, -1),
+                    ).detach().cpu()))
+                    if prev_cos_for_log is not None:
+                        drift_proto_drop.append(float(prev_cos_for_log - drift_proto_cos_batch[-1]))
 
                     # store raw prototype — ASRI not reflected in t_stats
                     self.t_stats["fg"][k] = (raw_updated_mean.detach(), None)
@@ -645,6 +675,23 @@ class GeneralizedRCNN(nn.Module):
                         # loss_gl_align += nn.L1Loss()(cur_bn_stats[idx][0], self.s_stats["bn_stats"][idx][0])
                         # loss_gl_align += self.alpha_fg * nn.L1Loss()(cur_bn_stats[idx][1], self.s_stats["bn_stats"][idx][1])
             adapt_loss["global_align"] = self.alpha_gl * loss_gl_align
+
+        def _mean_or_none(vals):
+            return float(sum(vals) / len(vals)) if vals else None
+
+        self._last_drift_stats = {
+            "fg_num_classes": len(drift_proto_classes),
+            "fg_num_boxes": int(sum(drift_fg_counts)),
+            "fg_count_mean": _mean_or_none(drift_fg_counts),
+            "fg_score_mean": _mean_or_none(drift_fg_scores),
+            "proto_cos_source_mean": _mean_or_none(drift_proto_cos_source),
+            "proto_drift_source_mean": (1.0 - _mean_or_none(drift_proto_cos_source))
+                if drift_proto_cos_source else None,
+            "proto_cos_batch_mean": _mean_or_none(drift_proto_cos_batch),
+            "proto_cos_drop_mean": _mean_or_none(drift_proto_drop),
+            "proto_reset_count": len(drift_reset_classes),
+            "proto_reset_classes": drift_reset_classes[:20],
+        }
 
         if do_postprocess:
             assert not torch.jit.is_scripting(), "Scripting is not supported for postprocess."

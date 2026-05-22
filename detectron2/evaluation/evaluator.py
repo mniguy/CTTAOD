@@ -1,5 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import datetime
+import json
 import logging
 import time
 from collections import OrderedDict, abc
@@ -464,6 +465,64 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
     else:
         ewc_anchor = None
 
+    # Exp 14: optional drift logging. This does not affect adaptation; it only
+    # records prototype-side statistics produced by the model and adapter
+    # movement from the source initialization.
+    drift_log = getattr(cfg.TEST.ADAPTATION, "DRIFT_LOG", False)
+    drift_log_period = max(int(getattr(cfg.TEST.ADAPTATION, "DRIFT_LOG_PERIOD", 1)), 1)
+    drift_log_path = None
+    if drift_log and is_main_process():
+        drift_dir = os.path.join(cfg.OUTPUT_DIR, "drift")
+        os.makedirs(drift_dir, exist_ok=True)
+        drift_log_path = os.path.join(drift_dir, "drift_log.jsonl")
+        if d_idx == 0 and os.path.exists(drift_log_path):
+            os.remove(drift_log_path)
+
+    if drift_log and not hasattr(model, "_drift_source_weights"):
+        model._drift_source_weights = [
+            p.clone().detach() for pg in optimizer.param_groups for p in pg["params"]
+        ]
+
+    if (drift_log and ewc_fisher is None
+            and cfg.TEST.ADAPTATION.EWC_FISHER_PATH is not None):
+        import torch as _torch
+        ewc_fisher = _torch.load(cfg.TEST.ADAPTATION.EWC_FISHER_PATH)
+        if cfg.TEST.ADAPTATION.EWC_FISHER_NORM:
+            ewc_fisher = [f / (f.mean() + 1e-12) for f in ewc_fisher]
+
+    def _adapter_drift_stats():
+        if not drift_log or not hasattr(model, "_drift_source_weights"):
+            return {}
+        params = [p for pg in optimizer.param_groups for p in pg["params"]]
+        l2_sq = 0.0
+        n_params = 0
+        fisher_sq = 0.0
+        has_fisher = ewc_fisher is not None
+        with torch.no_grad():
+            for p_idx, (p, src) in enumerate(zip(params, model._drift_source_weights)):
+                diff = p.detach() - src.to(p.device)
+                l2_sq += float((diff ** 2).sum().detach().cpu())
+                n_params += diff.numel()
+                if has_fisher and p_idx < len(ewc_fisher):
+                    fisher = ewc_fisher[p_idx].to(p.device)
+                    if isinstance(fisher, torch.Tensor) and fisher.shape == p.shape:
+                        fisher_sq += float((fisher * diff ** 2).sum().detach().cpu())
+                    else:
+                        has_fisher = False
+        out = {
+            "adapter_l2": float(l2_sq ** 0.5),
+            "adapter_l2_mean": float((l2_sq / max(n_params, 1)) ** 0.5),
+        }
+        if has_fisher:
+            out["adapter_fisher"] = float(fisher_sq)
+            out["adapter_fisher_sqrt"] = float(max(fisher_sq, 0.0) ** 0.5)
+        return out
+
+    def _scalar(v):
+        if isinstance(v, torch.Tensor):
+            return float(v.detach().cpu())
+        return float(v)
+
     stoch_restore = cfg.TEST.ADAPTATION.STOCHASTIC_RESTORE
     stoch_prob    = cfg.TEST.ADAPTATION.STOCHASTIC_RESTORE_PROB
     ewc_lambda    = cfg.TEST.ADAPTATION.EWC_LAMBDA
@@ -619,6 +678,23 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                     loss_ema99 = 0.99 * loss_ema99 + 0.01 * float(losses["global_align"])
                     loss_ema95 = 0.95 * loss_ema95 + 0.05 * float(losses["global_align"])
                     loss_ema90 = 0.9 * loss_ema90 + 0.1 * float(losses["global_align"])
+
+                if drift_log_path is not None and idx % drift_log_period == 0:
+                    record = {
+                        "domain_idx": int(d_idx),
+                        "domain_name": domain_name,
+                        "iter": int(idx),
+                        "global_step": int(cur_step),
+                        "cur_used": bool(cur_used),
+                        "accumulated_used": int(is_used),
+                        "losses": {k: _scalar(v) for k, v in losses.items()},
+                        "total_loss": _scalar(total_loss),
+                    }
+                    record.update(_adapter_drift_stats())
+                    record.update(getattr(model, "_last_drift_stats", {}) or {})
+                    with open(drift_log_path, "a") as fp:
+                        fp.write(json.dumps(record) + "\n")
+
                 del losses, total_loss
             else:
                 with torch.no_grad():
