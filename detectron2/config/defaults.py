@@ -777,6 +777,7 @@ _C.TEST.ADAPTATION.CB_PROTO_INV_FREQ = False         # also apply inv-frequency 
 #   baseline       : no change to existing CTTAOD update path
 #   reset          : Sol-A. Domain-shift detection via cosine-sim drop -> reset prototype to source anchor
 #   dual_memory    : Sol-B. EMA prototype unchanged; KL loss uses blended (1-a)*mu_te + a*mu_tr
+#   reset_dual_memory: Sol-A reset for stored prototype + Sol-B source blend at KL loss-time
 #   adaptive_gamma : Sol-C. gamma scaled by cosine similarity (mean-based EMA, clamped)
 _C.TEST.ADAPTATION.PROTO_METHOD = "baseline"
 _C.TEST.ADAPTATION.SWITCH_COSIM_THR = 0.30           # Sol-A: cosine-sim drop threshold

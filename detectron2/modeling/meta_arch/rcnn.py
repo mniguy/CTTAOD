@@ -160,7 +160,7 @@ class GeneralizedRCNN(nn.Module):
         self.cb_proto_max_per_class = cb_proto_max_per_class
         self.cb_proto_inv_freq = cb_proto_inv_freq
         # Exp 12: Sol A/B/C
-        assert proto_method in ("baseline", "reset", "dual_memory", "adaptive_gamma"), \
+        assert proto_method in ("baseline", "reset", "dual_memory", "reset_dual_memory", "adaptive_gamma"), \
             f"Unknown proto_method: {proto_method}"
         self.proto_method = proto_method
         self.switch_cosim_thr = switch_cosim_thr
@@ -230,8 +230,8 @@ class GeneralizedRCNN(nn.Module):
                 self.template_cov["fg"][k] = torch.eye(mean.shape[0]) * cov.max().item() / 30
                 self.t_stats["fg"][k] = (mean, cov)
                 self.ema_n[k] = 0
-                # Exp 12 Sol A/B: freeze source prototype as anchor for reset/blend
-                if self.proto_method in ("reset", "dual_memory"):
+                # Exp 12/16 Sol A/B: freeze source prototype as anchor for reset/blend
+                if self.proto_method in ("reset", "dual_memory", "reset_dual_memory"):
                     self.s_proto_anchor[k] = mean.clone()
         self.s_div = self.s_stats["kl_div"] if self.s_stats is not None and "kl_div" in self.s_stats else None
         # reset sliding window buffers at domain boundary
@@ -482,7 +482,7 @@ class GeneralizedRCNN(nn.Module):
                             batch_mean.reshape(1, -1),
                         ).item()
 
-                        if self.proto_method == "reset":
+                        if self.proto_method in ("reset", "reset_dual_memory"):
                             # Sol-A: cosine-sim *drop* between consecutive steps triggers reset to source.
                             prev_cs = self.prev_cosine_sim.get(k, cosine_sim_before)
                             drop = prev_cs - cosine_sim_before
@@ -582,9 +582,9 @@ class GeneralizedRCNN(nn.Module):
                         cur_target_mean = raw_updated_mean
                     # ──────────────────────────────────────────────────────────
 
-                    # Exp 12 Sol-B: source residual injection at KL-loss time only.
+                    # Exp 12/16 Sol-B: source residual injection at KL-loss time only.
                     # EMA prototype stays raw (stored above); KL t_dist mean is blended.
-                    if self.proto_method == "dual_memory" and k in self.s_proto_anchor:
+                    if self.proto_method in ("dual_memory", "reset_dual_memory") and k in self.s_proto_anchor:
                         a = self.source_anchor_alpha
                         cur_target_mean = (1.0 - a) * cur_target_mean \
                                           + a * self.s_proto_anchor[k].to(self.device)
