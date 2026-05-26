@@ -152,8 +152,10 @@ def main(args):
 
     if args.eval_only:
         if cfg.TEST.CONTINUAL_DOMAIN:
-            if 'cityscapes' in cfg.DATASETS.TEST[0] and cfg.TEST.EVAL_MATRIX:
-                # ASRI experiments: build full (T+1)×T evaluation matrix
+            if cfg.TEST.EVAL_MATRIX and (
+                'cityscapes' in cfg.DATASETS.TEST[0] or 'coco' in cfg.DATASETS.TEST[0]
+            ):
+                # Build full (T+1)×T evaluation matrix for corruption sequences.
                 res, metrics = Trainer.test_continual_domain_eval_matrix(cfg, wandb)
                 if comm.is_main_process():
                     import json
