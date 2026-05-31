@@ -163,8 +163,8 @@ cython_debug/
 wandb/
 outputs/
 output/
-results/
 fig/
+paper/
 *.pth
 *.out
 .DS_Store
