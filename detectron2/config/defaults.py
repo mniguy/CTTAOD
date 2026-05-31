@@ -740,6 +740,8 @@ _C.TEST.ADAPTATION.EWC_FISHER_NORM = False
 #     effective_λ = λ / max(ratio / BETA, 1.0)  →  larger drift, smaller λ.
 _C.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE = False
 _C.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE_BETA = 1.0
+_C.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE_MODE = "global_align"  # "global_align" | "pressure"
+_C.TEST.ADAPTATION.EWC_LAMBDA_MIN_SCALE = 0.1
 # (C) Sliding anchor: EMA-update the anchor each step instead of fixing at source.
 _C.TEST.ADAPTATION.EWC_SLIDING_ANCHOR = False
 _C.TEST.ADAPTATION.EWC_SLIDING_ANCHOR_BETA = 0.999
@@ -782,6 +784,14 @@ _C.TEST.ADAPTATION.CB_PROTO_INV_FREQ = False         # also apply inv-frequency 
 _C.TEST.ADAPTATION.PROTO_METHOD = "baseline"
 _C.TEST.ADAPTATION.SWITCH_COSIM_THR = 0.30           # Sol-A: cosine-sim drop threshold
 _C.TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA = 0.3         # Sol-B: source residual blend weight
+# Confidence/count-gated Sol-B alpha for backbone checks.
+# reliability = min(1, N_k / COUNT_REF) * avg_score_k
+# alpha_t = MAX - (MAX - MIN) * reliability ** CONF_LAMBDA
+_C.TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA_ADAPTIVE = False
+_C.TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA_MIN = 0.2
+_C.TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA_MAX = 0.6
+_C.TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA_COUNT_REF = 32.0
+_C.TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA_CONF_LAMBDA = 1.0
 
 # Exp 14: Two-drift diagnosis logging.
 # Writes per-adaptation-step prototype drift, adapter drift, pseudo-label quality,

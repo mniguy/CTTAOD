@@ -76,6 +76,11 @@ class GeneralizedRCNN(nn.Module):
         proto_method: str = "baseline",
         switch_cosim_thr: float = 0.30,
         source_anchor_alpha: float = 0.30,
+        source_anchor_alpha_adaptive: bool = False,
+        source_anchor_alpha_min: float = 0.20,
+        source_anchor_alpha_max: float = 0.60,
+        source_anchor_alpha_count_ref: float = 32.0,
+        source_anchor_alpha_conf_lambda: float = 1.0,
     ):
         """
         Args:
@@ -165,6 +170,11 @@ class GeneralizedRCNN(nn.Module):
         self.proto_method = proto_method
         self.switch_cosim_thr = switch_cosim_thr
         self.source_anchor_alpha = source_anchor_alpha
+        self.source_anchor_alpha_adaptive = source_anchor_alpha_adaptive
+        self.source_anchor_alpha_min = source_anchor_alpha_min
+        self.source_anchor_alpha_max = source_anchor_alpha_max
+        self.source_anchor_alpha_count_ref = source_anchor_alpha_count_ref
+        self.source_anchor_alpha_conf_lambda = source_anchor_alpha_conf_lambda
         self.prev_cosine_sim = {}   # {k: previous step's cosine_sim_before}
         self.s_proto_anchor = {}    # {k: frozen source prototype}
         self._last_drift_stats = {} # Exp 14: populated by adapt() for JSONL logging
@@ -211,6 +221,11 @@ class GeneralizedRCNN(nn.Module):
             "proto_method":        getattr(cfg.TEST.ADAPTATION, "PROTO_METHOD",         "baseline"),
             "switch_cosim_thr":    getattr(cfg.TEST.ADAPTATION, "SWITCH_COSIM_THR",     0.30),
             "source_anchor_alpha": getattr(cfg.TEST.ADAPTATION, "SOURCE_ANCHOR_ALPHA",  0.30),
+            "source_anchor_alpha_adaptive": getattr(cfg.TEST.ADAPTATION, "SOURCE_ANCHOR_ALPHA_ADAPTIVE", False),
+            "source_anchor_alpha_min": getattr(cfg.TEST.ADAPTATION, "SOURCE_ANCHOR_ALPHA_MIN", 0.20),
+            "source_anchor_alpha_max": getattr(cfg.TEST.ADAPTATION, "SOURCE_ANCHOR_ALPHA_MAX", 0.60),
+            "source_anchor_alpha_count_ref": getattr(cfg.TEST.ADAPTATION, "SOURCE_ANCHOR_ALPHA_COUNT_REF", 32.0),
+            "source_anchor_alpha_conf_lambda": getattr(cfg.TEST.ADAPTATION, "SOURCE_ANCHOR_ALPHA_CONF_LAMBDA", 1.0),
         }
 
     def initialize(self):
@@ -380,6 +395,7 @@ class GeneralizedRCNN(nn.Module):
         drift_proto_classes = []
         drift_fg_counts = []
         drift_fg_scores = []
+        drift_source_anchor_alpha = []
         drift_reset_classes = []
         self.roi_heads.training = False
         self.proposal_generator.training = False
@@ -585,7 +601,19 @@ class GeneralizedRCNN(nn.Module):
                     # Exp 12/16 Sol-B: source residual injection at KL-loss time only.
                     # EMA prototype stays raw (stored above); KL t_dist mean is blended.
                     if self.proto_method in ("dual_memory", "reset_dual_memory") and k in self.s_proto_anchor:
-                        a = self.source_anchor_alpha
+                        if self.source_anchor_alpha_adaptive:
+                            avg_score = float(cur_scores.mean().detach().cpu())
+                            count_ref = max(float(self.source_anchor_alpha_count_ref), 1.0)
+                            reliability = min(float(n_full) / count_ref, 1.0) * max(min(avg_score, 1.0), 0.0)
+                            gamma = max(float(self.source_anchor_alpha_conf_lambda), 1e-6)
+                            a_min = float(self.source_anchor_alpha_min)
+                            a_max = float(self.source_anchor_alpha_max)
+                            if a_min > a_max:
+                                a_min, a_max = a_max, a_min
+                            a = a_max - (a_max - a_min) * (reliability ** gamma)
+                        else:
+                            a = self.source_anchor_alpha
+                        drift_source_anchor_alpha.append(float(a))
                         cur_target_mean = (1.0 - a) * cur_target_mean \
                                           + a * self.s_proto_anchor[k].to(self.device)
 
@@ -689,6 +717,7 @@ class GeneralizedRCNN(nn.Module):
                 if drift_proto_cos_source else None,
             "proto_cos_batch_mean": _mean_or_none(drift_proto_cos_batch),
             "proto_cos_drop_mean": _mean_or_none(drift_proto_drop),
+            "source_anchor_alpha_mean": _mean_or_none(drift_source_anchor_alpha),
             "proto_reset_count": len(drift_reset_classes),
             "proto_reset_classes": drift_reset_classes[:20],
         }

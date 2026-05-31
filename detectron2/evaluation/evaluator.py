@@ -527,6 +527,7 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
     stoch_prob    = cfg.TEST.ADAPTATION.STOCHASTIC_RESTORE_PROB
     ewc_lambda    = cfg.TEST.ADAPTATION.EWC_LAMBDA
     proto_replay  = cfg.TEST.ADAPTATION.PROTOTYPE_REPLAY
+    last_effective_ewc_lambda = None
 
     with EventStorage() as storage:
         for idx, inputs in enumerate(data_loader):
@@ -586,14 +587,28 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                     # When global_align is large relative to its EMA (i.e. domain
                     # just shifted), shrink λ so adaptation isn't choked. When the
                     # ratio is ≤ BETA (stable), keep λ as-is.
-                    if cfg.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE and "global_align" in losses:
-                        ga = float(losses["global_align"])
-                        ratio = ga / (loss_ema99 + 1e-7)
+                    if cfg.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE:
                         beta_a = cfg.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE_BETA
-                        scale = 1.0 / max(ratio / beta_a, 1.0)
+                        min_scale = cfg.TEST.ADAPTATION.EWC_LAMBDA_MIN_SCALE
+                        mode = cfg.TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE_MODE
+                        if mode == "pressure":
+                            raw_ewc = float(ewc_loss.detach().cpu())
+                            if not hasattr(model, "_ewc_loss_ema"):
+                                model._ewc_loss_ema = raw_ewc
+                            target = max(model._ewc_loss_ema * beta_a, 1e-12)
+                            scale = min(1.0, target / max(raw_ewc, 1e-12))
+                            model._ewc_loss_ema = 0.99 * model._ewc_loss_ema + 0.01 * raw_ewc
+                        elif "global_align" in losses:
+                            ga = float(losses["global_align"])
+                            ratio = ga / (loss_ema99 + 1e-7)
+                            scale = 1.0 / max(ratio / beta_a, 1.0)
+                        else:
+                            scale = 1.0
+                        scale = max(float(min_scale), float(scale))
                         effective_lambda = ewc_lambda * scale
                     else:
                         effective_lambda = ewc_lambda
+                    last_effective_ewc_lambda = float(effective_lambda)
                     losses["ewc"] = effective_lambda * ewc_loss
 
                 # Exp 4: Prototype Replay — penalise deviation from buffered prototypes
@@ -690,6 +705,8 @@ def inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, e
                         "losses": {k: _scalar(v) for k, v in losses.items()},
                         "total_loss": _scalar(total_loss),
                     }
+                    if last_effective_ewc_lambda is not None:
+                        record["effective_ewc_lambda"] = last_effective_ewc_lambda
                     record.update(_adapter_drift_stats())
                     record.update(getattr(model, "_last_drift_stats", {}) or {})
                     with open(drift_log_path, "a") as fp:

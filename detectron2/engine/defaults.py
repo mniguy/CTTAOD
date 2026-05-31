@@ -815,6 +815,16 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
             flat_metrics = {k: v.get("bbox", v) for k, v in results.items()}
             with open(os.path.join(out_dir, "metrics.json"), "w") as _f:
                 _json.dump(flat_metrics, _f, indent=2)
+            meta = {
+                "backward_num": {str(k): int(v) for k, v in backward_num.items()},
+                "elapsed_time": {str(k): float(v) for k, v in elapsed_time.items()},
+                "total_sample_num": int(total_sample_num),
+                "backward_batches": int(sum(backward_num.values())),
+                "backward_images": int(sum(backward_num.values()) * cfg.SOLVER.IMS_PER_BATCH_TEST),
+                "fps": float(total_sample_num / max(sum(elapsed_time.values()), 1e-12)),
+            }
+            with open(os.path.join(out_dir, "run_meta.json"), "w") as _f:
+                _json.dump(meta, _f, indent=2)
 
         if len(results) == 1:
             results = list(results.values())[0]
