@@ -1,0 +1,188 @@
+{
+  "window_logged_steps": 3,
+  "ap_granularity": "AP before/after reset is computed at eval-matrix domain granularity: row j before adapting domain j and row j+1 after adapting domain j. Per-iteration AP would require an additional online-eval hook.",
+  "events": {
+    "d0_baseline": [],
+    "d1_oracle_proto": [],
+    "d2_adapter_reset": [],
+    "d3_proto_reset_thr0_40": [
+      {
+        "tag": "d3_proto_reset_thr0_40",
+        "domain_idx": 3,
+        "domain_name": "defocus_blur",
+        "iter": 881,
+        "global_step": 18524,
+        "proto_reset_count": 1,
+        "proto_reset_classes": [
+          61
+        ],
+        "window": 3,
+        "fg_align_loss_before": 553.374766031901,
+        "fg_align_loss_at": 385.8983459472656,
+        "fg_align_loss_after": 576.6831766764323,
+        "global_align_loss_before": 58.521321614583336,
+        "global_align_loss_at": 58.48162841796875,
+        "global_align_loss_after": 57.880716959635414,
+        "proto_drift_before": 0.017417697616355143,
+        "proto_drift_at": 0.014217212796211243,
+        "proto_drift_after": 0.017688421148156386,
+        "fg_align_loss_after_minus_before": 23.30841064453125,
+        "global_align_loss_after_minus_before": -0.6406046549479214,
+        "proto_drift_after_minus_before": 0.0002707235318012424
+      },
+      {
+        "tag": "d3_proto_reset_thr0_40",
+        "domain_idx": 5,
+        "domain_name": "motion_blur",
+        "iter": 491,
+        "global_step": 26964,
+        "proto_reset_count": 1,
+        "proto_reset_classes": [
+          20
+        ],
+        "window": 3,
+        "fg_align_loss_before": 463.9632873535156,
+        "fg_align_loss_at": 655.1593017578125,
+        "fg_align_loss_after": 316.50290934244794,
+        "global_align_loss_before": 55.48955281575521,
+        "global_align_loss_at": 56.100128173828125,
+        "global_align_loss_after": 56.8098398844401,
+        "proto_drift_before": 0.016155434979332806,
+        "proto_drift_at": 0.011509662866592385,
+        "proto_drift_after": 0.01636892462533616,
+        "fg_align_loss_after_minus_before": -147.4603780110677,
+        "global_align_loss_after_minus_before": 1.320287068684891,
+        "proto_drift_after_minus_before": 0.0002134896460033557
+      },
+      {
+        "tag": "d3_proto_reset_thr0_40",
+        "domain_idx": 10,
+        "domain_name": "brightness",
+        "iter": 450,
+        "global_step": 51800,
+        "proto_reset_count": 1,
+        "proto_reset_classes": [
+          71
+        ],
+        "window": 3,
+        "fg_align_loss_before": 326.7203877766927,
+        "fg_align_loss_at": 320.1109313964844,
+        "fg_align_loss_after": 255.1683349609375,
+        "global_align_loss_before": 28.018712361653645,
+        "global_align_loss_at": 28.461288452148438,
+        "global_align_loss_after": 29.132568359375,
+        "proto_drift_before": 0.014252486052336533,
+        "proto_drift_at": 0.015945526686581668,
+        "proto_drift_after": 0.01305199189791606,
+        "fg_align_loss_after_minus_before": -71.55205281575519,
+        "global_align_loss_after_minus_before": 1.1138559977213554,
+        "proto_drift_after_minus_before": -0.0012004941544204728
+      },
+      {
+        "tag": "d3_proto_reset_thr0_40",
+        "domain_idx": 12,
+        "domain_name": "elastic_transform",
+        "iter": 1171,
+        "global_step": 64684,
+        "proto_reset_count": 1,
+        "proto_reset_classes": [
+          0
+        ],
+        "window": 3,
+        "fg_align_loss_before": 204.71912384033203,
+        "fg_align_loss_at": 225.54318237304688,
+        "fg_align_loss_after": 554.8589070638021,
+        "global_align_loss_before": 46.598917643229164,
+        "global_align_loss_at": 47.95025634765625,
+        "global_align_loss_after": 46.71964009602865,
+        "proto_drift_before": 0.010880596013296237,
+        "proto_drift_at": 0.014218342304229692,
+        "proto_drift_after": 0.011154646403861768,
+        "fg_align_loss_after_minus_before": 350.1397832234701,
+        "global_align_loss_after_minus_before": 0.1207224527994839,
+        "proto_drift_after_minus_before": 0.00027405039056553095
+      }
+    ],
+    "d4_adapter_reset_proto_reset_thr0_40": [
+      {
+        "tag": "d4_adapter_reset_proto_reset_thr0_40",
+        "domain_idx": 4,
+        "domain_name": "glass_blur",
+        "iter": 671,
+        "global_step": 22684,
+        "proto_reset_count": 1,
+        "proto_reset_classes": [
+          25
+        ],
+        "window": 3,
+        "fg_align_loss_before": 520.9747924804688,
+        "fg_align_loss_at": 559.1202392578125,
+        "fg_align_loss_after": 320.30470275878906,
+        "global_align_loss_before": 52.90868123372396,
+        "global_align_loss_at": 53.617401123046875,
+        "global_align_loss_after": 53.530242919921875,
+        "proto_drift_before": 0.0176971489632571,
+        "proto_drift_at": 0.01817312240600588,
+        "proto_drift_after": 0.016029713054498036,
+        "fg_align_loss_after_minus_before": -200.6700897216797,
+        "global_align_loss_after_minus_before": 0.6215616861979143,
+        "proto_drift_after_minus_before": -0.0016674359087590629
+      },
+      {
+        "tag": "d4_adapter_reset_proto_reset_thr0_40",
+        "domain_idx": 8,
+        "domain_name": "frost",
+        "iter": 871,
+        "global_step": 43484,
+        "proto_reset_count": 1,
+        "proto_reset_classes": [
+          4
+        ],
+        "window": 3,
+        "fg_align_loss_before": 601.2740173339844,
+        "fg_align_loss_at": 355.893798828125,
+        "fg_align_loss_after": 330.3028310139974,
+        "global_align_loss_before": 37.86371358235677,
+        "global_align_loss_at": 34.49580383300781,
+        "global_align_loss_after": 36.408528645833336,
+        "proto_drift_before": 0.01418717172410755,
+        "proto_drift_at": 0.01287136971950531,
+        "proto_drift_after": 0.013560475574599384,
+        "fg_align_loss_after_minus_before": -270.971186319987,
+        "global_align_loss_after_minus_before": -1.4551849365234375,
+        "proto_drift_after_minus_before": -0.0006266961495081658
+      },
+      {
+        "tag": "d4_adapter_reset_proto_reset_thr0_40",
+        "domain_idx": 10,
+        "domain_name": "brightness",
+        "iter": 450,
+        "global_step": 51800,
+        "proto_reset_count": 1,
+        "proto_reset_classes": [
+          71
+        ],
+        "window": 3,
+        "fg_align_loss_before": 303.77356974283856,
+        "fg_align_loss_at": 326.5472106933594,
+        "fg_align_loss_after": 258.5747578938802,
+        "global_align_loss_before": 30.036412556966145,
+        "global_align_loss_at": 30.517990112304688,
+        "global_align_loss_after": 31.44360860188802,
+        "proto_drift_before": 0.014400068918863917,
+        "proto_drift_at": 0.01562046462839295,
+        "proto_drift_after": 0.013164085859344107,
+        "fg_align_loss_after_minus_before": -45.19881184895837,
+        "global_align_loss_after_minus_before": 1.407196044921875,
+        "proto_drift_after_minus_before": -0.0012359830595198105
+      }
+    ]
+  },
+  "domain_level_ap": {
+    "d0_baseline": [],
+    "d1_oracle_proto": [],
+    "d2_adapter_reset": [],
+    "d3_proto_reset_thr0_40": [],
+    "d4_adapter_reset_proto_reset_thr0_40": []
+  }
+}
