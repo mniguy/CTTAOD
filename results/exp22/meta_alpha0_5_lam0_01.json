@@ -1,0 +1,42 @@
+{
+  "backward_num": {
+    "coco_2017_val-gaussian_noise": 1250,
+    "coco_2017_val-shot_noise": 1250,
+    "coco_2017_val-impulse_noise": 1250,
+    "coco_2017_val-defocus_blur": 1250,
+    "coco_2017_val-glass_blur": 1250,
+    "coco_2017_val-motion_blur": 1250,
+    "coco_2017_val-zoom_blur": 1250,
+    "coco_2017_val-snow": 1250,
+    "coco_2017_val-frost": 1250,
+    "coco_2017_val-fog": 1250,
+    "coco_2017_val-brightness": 1250,
+    "coco_2017_val-contrast": 1250,
+    "coco_2017_val-elastic_transform": 1250,
+    "coco_2017_val-pixelate": 1250,
+    "coco_2017_val-jpeg_compression": 1250,
+    "coco_2017_val": 1250
+  },
+  "elapsed_time": {
+    "coco_2017_val-gaussian_noise": 421.5881045470014,
+    "coco_2017_val-shot_noise": 429.859266188927,
+    "coco_2017_val-impulse_noise": 430.9020130056888,
+    "coco_2017_val-defocus_blur": 431.7247218610719,
+    "coco_2017_val-glass_blur": 437.86280887853354,
+    "coco_2017_val-motion_blur": 435.0784321418032,
+    "coco_2017_val-zoom_blur": 434.5245418827981,
+    "coco_2017_val-snow": 440.4560796516016,
+    "coco_2017_val-frost": 441.67527710366994,
+    "coco_2017_val-fog": 450.4105375800282,
+    "coco_2017_val-brightness": 452.7870435267687,
+    "coco_2017_val-contrast": 440.61030194722116,
+    "coco_2017_val-elastic_transform": 446.4289169097319,
+    "coco_2017_val-pixelate": 437.2922267150134,
+    "coco_2017_val-jpeg_compression": 442.3966066753492,
+    "coco_2017_val": 456.2567424522713
+  },
+  "total_sample_num": 80000,
+  "backward_batches": 20000,
+  "backward_images": 80000,
+  "fps": 11.380037809073476
+}
