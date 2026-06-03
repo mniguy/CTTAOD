@@ -162,6 +162,7 @@ cython_debug/
 
 wandb/
 outputs/
+results/
 fig/
 paper/
 *.pth
