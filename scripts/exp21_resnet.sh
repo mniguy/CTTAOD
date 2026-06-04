@@ -8,14 +8,16 @@
 #   ResNet-50 backbone, mirroring the Swin-T sweep in exp20/exp22.
 #
 # Reproduction target:
-#   The anchor point alpha=0.40, lambda=10.0 reproduces the previously reported
+#   The anchor point alpha=0.40, lambda=10.0 targets the previously reported
 #   Sol-B + EWC ResNet-50 result of mean(16)=22.87 (= AP16, the mean over the 15
 #   corruptions + clean coco_2017_val).
 #   That number originally came from exp13 E4 (results/exp13/metrics_e4_ewc10_solB_a0_4.json,
 #   AP16=22.87, AP15=21.53, clean=42.96) using:
 #       PROTO_METHOD dual_memory + SOURCE_ANCHOR_ALPHA 0.4 + EWC_LAMBDA 10.0
 #       WHERE adapter, GLOBAL/FOREGROUND_ALIGN KL, EMA_BETA 0, SWEMA_K 0, ASRI_ALPHA 0.
-#   This script reuses that exact adaptation setting and only varies alpha / lambda.
+#   This script reuses that adaptation setting and only varies alpha / lambda.
+#   Exact AP is not guaranteed unless the same checkpoint, stats/fisher files,
+#   corrupted image folders, seed, and code path are used.
 #
 # NOTE on SKIP_REDUNDANT:
 #   exp13 did not override SKIP_REDUNDANT, so it inherited COCO_R50.yaml's default
@@ -29,30 +31,32 @@
 #   a BWT/FWT metrics.json (NOT the coco_2017_val-<corruption> format the AP16
 #   summary needs). The mean(16)=22.87 metrics actually come from the standard
 #   test_continual_domain path (it always writes eval_matrix/metrics.json in the
-#   coco_2017_val-<corruption> format). So EVAL_MATRIX is intentionally left at its
-#   default (False) here — matching exp20/exp22/exp23 — to get the AP16 metrics.
+#   coco_2017_val-<corruption> format). So EVAL_MATRIX is explicitly set to False
+#   here to force the AP16 metrics path.
 #
 # Runs (you choose the exact set):
 #   Edit the DEFAULT_PAIRS list below — each entry is "ALPHA LAMBDA" — or override
 #   it on the command line via EXP21_PAIRS (see Optional env). Duplicate pairs are
-#   skipped. The pair (0.40, 10.0) reproduces mean(16)=22.87.
+#   skipped. The pair (0.40, 10.0) is the 22.87 reference point.
 #
 # Outputs per run (tag = alpha<a>_lam<l>):
 #   results/exp21/metrics_<tag>.json     coco_2017_val-<corruption> + coco_2017_val AP
 #   results/exp21/meta_<tag>.json        backward images / fps
-#   results/exp21/drift_<tag>.jsonl      per-step drift diagnostics
+#   results/exp21/drift_<tag>.jsonl      per-step drift diagnostics, if enabled
 #
 # Summary outputs:
 #   results/exp21/r50_summary.json
 #   results/exp21/r50_summary_table.md
 #
 # Usage:
-#   bash scripts/exp21_solB_ewc_r50_sweep.sh [CHECKPOINT_PATH]
+#   bash scripts/exp21_resnet.sh [CHECKPOINT_PATH]
 #
 # Optional env:
 #   EXP21_PAIRS="0.4:10.0 0.5:10.0 0.3:1.0"   set of alpha:lambda runs to launch
 #                                             (space- or comma-separated; overrides DEFAULT_PAIRS)
-#   EXP21_LOG_PERIOD=10                        drift log interval
+#   EXP21_SEED=0                               set non-negative seed for reproducibility
+#   EXP21_DRIFT_LOG=True                       enable drift diagnostics
+#   EXP21_LOG_PERIOD=10                        drift log interval when enabled
 # =============================================================================
 
 set -e
@@ -67,15 +71,14 @@ STATS_PATH="../models/stats/COCO_R50_stats.pt"
 FISHER_PATH="../models/stats/COCO_R50_fisher.pt"
 
 EXP21_LOG_PERIOD="${EXP21_LOG_PERIOD:-10}"
+EXP21_SEED="${EXP21_SEED:--1}"
+EXP21_DRIFT_LOG="${EXP21_DRIFT_LOG:-False}"
 
 # ── Choose which (alpha, lambda) runs to launch ──────────────────────────────
-# Each entry is "ALPHA LAMBDA". Edit this list freely. (0.4 10.0) => mean(16)=22.87.
+# Each entry is "ALPHA LAMBDA". Edit this list freely. (0.4 10.0) is the reference point.
 DEFAULT_PAIRS=(
     "0.4 10.0"
-    "0.5 10.0"
-    "0.3 10.0"
     "0.4 1.0"
-    "0.4 0.0"
 )
 # EXP21_PAIRS, if set, overrides DEFAULT_PAIRS: space/comma-separated "alpha:lambda".
 if [ -n "${EXP21_PAIRS:-}" ]; then
@@ -102,14 +105,16 @@ collect() {
     cp "${out}/drift/drift_log.jsonl"     "../results/exp21/drift_${tag}.jsonl"  2>/dev/null || true
 }
 
-# Reproduces the exp13 E4 (mean16=22.87) adaptation setting; alpha/lambda are
-# overridden per run. EVAL_MATRIX is left at its default (False) on purpose.
+# Matches the exp13 E4 adaptation setting as closely as the current code path
+# allows; alpha/lambda are overridden per run.
 COMMON_ARGS=(
     --config-file "$CFG"
     --eval-only
+    SEED "$EXP21_SEED"
     MODEL.WEIGHTS "$CKPT"
     TEST.ONLINE_ADAPTATION True
     TEST.CONTINUAL_DOMAIN True
+    TEST.EVAL_MATRIX False
     TEST.ADAPTATION.CONTINUAL True
     TEST.ADAPTATION.WHERE "adapter"
     TEST.ADAPTATION.GLOBAL_ALIGN "KL"
@@ -122,10 +127,10 @@ COMMON_ARGS=(
     TEST.ADAPTATION.ASRI_ALPHA 0.0
     TEST.ADAPTATION.ADAPTER_RESET False
     TEST.ADAPTATION.ORACLE_PROTOTYPE False
-    # TEST.ADAPTATION.SKIP_REDUNDANT "stat-period-ema"
+    TEST.ADAPTATION.SKIP_REDUNDANT "stat-period-ema"
     TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA_ADAPTIVE False
     TEST.ADAPTATION.EWC_LAMBDA_ADAPTIVE False
-    TEST.ADAPTATION.DRIFT_LOG True
+    TEST.ADAPTATION.DRIFT_LOG "$EXP21_DRIFT_LOG"
     TEST.ADAPTATION.DRIFT_LOG_PERIOD "$EXP21_LOG_PERIOD"
 )
 
@@ -281,7 +286,7 @@ lines = [
     "# Exp21 ResNet-50 Sol-B + EWC: Alpha & Lambda Runs",
     "",
     "AP15 averages the 15 corruptions. AP16 also includes clean coco_2017_val.",
-    "Reference: alpha=0.40, lambda=10.00 reproduces mean(16)=22.87.",
+    "Reference: alpha=0.40, lambda=10.00 is the historical mean(16)=22.87 point.",
     "",
     "### All runs, sorted by AP16",
     "",
