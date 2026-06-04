@@ -53,7 +53,7 @@ elif [ -n "${EXP20_PAIRS:-}" ]; then
         PAIRS+=("$pair")
     done
 else
-    PAIRS=("0.4:10.0")
+    PAIRS=("0.4:1.0")
 fi
 
 validate_float() {
@@ -151,7 +151,6 @@ run_pair() {
         TEST.ADAPTATION.EMA_BETA 0.0 \
         TEST.ADAPTATION.SWEMA_K 0 \
         TEST.ADAPTATION.ASRI_ALPHA 0.0 \
-        TEST.ADAPTATION.SKIP_REDUNDANT "stat-period-ema" \
         TEST.ADAPTATION.ADAPTER_RESET False \
         TEST.ADAPTATION.ORACLE_PROTOTYPE False \
         TEST.ADAPTATION.SOURCE_ANCHOR_ALPHA_ADAPTIVE False \

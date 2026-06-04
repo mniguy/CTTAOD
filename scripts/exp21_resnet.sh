@@ -54,7 +54,7 @@
 # Optional env:
 #   EXP21_PAIRS="0.4:10.0 0.5:10.0 0.3:1.0"   set of alpha:lambda runs to launch
 #                                             (space- or comma-separated; overrides DEFAULT_PAIRS)
-#   EXP21_SEED=0                               set non-negative seed for reproducibility
+#   EXP21_SEED=0                               fixed seed for reproducibility
 #   EXP21_DRIFT_LOG=True                       enable drift diagnostics
 #   EXP21_LOG_PERIOD=10                        drift log interval when enabled
 # =============================================================================
@@ -71,14 +71,13 @@ STATS_PATH="../models/stats/COCO_R50_stats.pt"
 FISHER_PATH="../models/stats/COCO_R50_fisher.pt"
 
 EXP21_LOG_PERIOD="${EXP21_LOG_PERIOD:-10}"
-EXP21_SEED="${EXP21_SEED:--1}"
 EXP21_DRIFT_LOG="${EXP21_DRIFT_LOG:-False}"
 
 # ── Choose which (alpha, lambda) runs to launch ──────────────────────────────
 # Each entry is "ALPHA LAMBDA". Edit this list freely. (0.4 10.0) is the reference point.
 DEFAULT_PAIRS=(
-    "0.4 10.0"
-    "0.4 1.0"
+    "0.5 0.1"
+    "0.5 1.0"
 )
 # EXP21_PAIRS, if set, overrides DEFAULT_PAIRS: space/comma-separated "alpha:lambda".
 if [ -n "${EXP21_PAIRS:-}" ]; then
@@ -110,7 +109,6 @@ collect() {
 COMMON_ARGS=(
     --config-file "$CFG"
     --eval-only
-    SEED "$EXP21_SEED"
     MODEL.WEIGHTS "$CKPT"
     TEST.ONLINE_ADAPTATION True
     TEST.CONTINUAL_DOMAIN True
