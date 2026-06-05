@@ -53,7 +53,7 @@ elif [ -n "${EXP20_PAIRS:-}" ]; then
         PAIRS+=("$pair")
     done
 else
-    PAIRS=("0.4:1.0")
+    PAIRS=("0.5:0.1" "0.5:1.0")
 fi
 
 validate_float() {
