@@ -702,7 +702,25 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
         else:       # kitti
             test_domain = ['fog', 'rain', 'snow']
             # test_domain = ['rain']
-        for d_idx, corrupt in enumerate(test_domain):
+        # --- continual-stream order + multi-round controls (exp22) ---
+        _order = cfg.TEST.ADAPTATION.DOMAIN_ORDER
+        if _order == "reverse":
+            test_domain = list(test_domain)[::-1]
+        elif _order == "random":
+            import random as _random
+            _rng = _random.Random(int(cfg.TEST.ADAPTATION.DOMAIN_ORDER_SEED))
+            test_domain = list(test_domain)
+            _rng.shuffle(test_domain)
+        _num_rounds = max(1, int(cfg.TEST.ADAPTATION.NUM_ROUNDS))
+        # repeat the stream back-to-back without resetting the online state
+        stream = [(r, c) for r in range(_num_rounds) for c in test_domain]
+        logger.info("Continual stream: order=%s rounds=%d sequence=%s",
+                    _order, _num_rounds, test_domain)
+        for d_idx, (round_idx, corrupt) in enumerate(stream):
+            # result-dict key: keep the plain name for single-round (backward
+            # compatible), add a round tag only when repeating the stream.
+            dkey = "{}-{}".format(dataset_name, corrupt) if _num_rounds == 1 \
+                else "{}-rnd{}-{}".format(dataset_name, round_idx, corrupt)
             if d_idx == 0 or (d_idx >= 1 and not cfg.TEST.ADAPTATION.CONTINUAL):
                 model, optimizer, teacher_model = configure_model(cfg, DefaultTrainer, revert=True)
             data_loader = cls.build_test_loader(cfg, "{}-{}".format(dataset_name, corrupt))
@@ -719,12 +737,12 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
             if cfg.TEST.ONLINE_ADAPTATION:
                 results_i, loss_ema99, loss_ema95, loss_ema90, is_used, total_compute_time = inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, evaluator, d_idx, wandb, teacher_model=teacher_model, val_data_loader=None, val_evaluator=None, loss_ema99=loss_ema99, loss_ema95=loss_ema95, loss_ema90=loss_ema90, is_used=is_used, domain_name=corrupt)
                 #results_i, loss_ema99, loss_ema95, loss_ema90, is_used = inference_on_dataset_online_adaptation(cfg, model, data_loader, optimizer, evaluator, d_idx, wandb, teacher_model=teacher_model, loss_ema99=loss_ema99, loss_ema95=loss_ema95, loss_ema90=loss_ema90)
-                backward_num["{}-{}".format(dataset_name, corrupt)] = is_used - prev_used
+                backward_num[dkey] = is_used - prev_used
                 prev_used = is_used
             else:
                 results_i, total_compute_time = inference_on_dataset(model, data_loader, evaluator, domain_name=corrupt, visualize_dir=os.path.join(cfg.OUTPUT_DIR, corrupt))
-            results["{}-{}".format(dataset_name, corrupt)] = results_i
-            elapsed_time["{}-{}".format(dataset_name, corrupt)] = total_compute_time
+            results[dkey] = results_i
+            elapsed_time[dkey] = total_compute_time
             if comm.is_main_process():
                 assert isinstance(
                     results_i, dict

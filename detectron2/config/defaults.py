@@ -659,6 +659,13 @@ _C.TEST.ADAPTATION.SELECT_DOMAIN = False
 _C.TEST.ADAPTATION.TYPE = None
 _C.TEST.ADAPTATION.VALIDATION = False
 _C.TEST.ADAPTATION.CONTINUAL = False
+# Continual-stream controls (exp22 robustness studies).
+# DOMAIN_ORDER: "default" | "reverse" | "random" (seeded by DOMAIN_ORDER_SEED).
+_C.TEST.ADAPTATION.DOMAIN_ORDER = "default"
+_C.TEST.ADAPTATION.DOMAIN_ORDER_SEED = 0
+# NUM_ROUNDS: number of times the corruption stream is repeated back-to-back
+# without resetting the online state (multi-round continual stress test).
+_C.TEST.ADAPTATION.NUM_ROUNDS = 1
 _C.TEST.ADAPTATION.WHERE = "full"
 _C.TEST.ADAPTATION.NORM = None
 _C.TEST.ADAPTATION.FPN = False
